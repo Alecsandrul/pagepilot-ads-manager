@@ -45,15 +45,15 @@ CONFLICT = "(platform, date, campaign_id, COALESCE(adset_id,''), COALESCE(ad_id,
 
 def db_pass():
     for line in pathlib.Path(ENV_PATH).read_text().splitlines():
-        if line.startswith("ADSMGR_DB_PASS="):
+        if line.startswith("ADSMGR_SYNC_PASS="):
             return line.split("=", 1)[1].strip()
-    raise SystemExit("ADSMGR_DB_PASS missing from .env")
+    raise SystemExit("ADSMGR_SYNC_PASS missing from .env")
 
 
 def psql(password, sql_script):
     """Run a psql script; raise with stderr on any error."""
     p = subprocess.run(
-        ["psql", "-h", DB_HOST, "-p", "5432", "-U", "postgres", "-d", "postgres",
+        ["psql", "-h", DB_HOST, "-p", "5432", "-U", "ads_sync", "-d", "postgres",
          "-v", "ON_ERROR_STOP=1", "-qAt", "-f", "-"],
         input=sql_script, capture_output=True, text=True, timeout=300,
         env={"PGPASSWORD": password, "PGCONNECT_TIMEOUT": "15",
