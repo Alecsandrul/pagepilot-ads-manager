@@ -366,6 +366,7 @@ export default function AdsTable(props: Props) {
                 <div
                   key={c.k}
                   className="col-head"
+                  title={c.tip}
                   onClick={() => onSort(c.k)}
                   style={{
                     flex: `0 0 ${c.w}px`,

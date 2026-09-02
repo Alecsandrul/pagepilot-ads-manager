@@ -39,6 +39,10 @@ export interface Metrics {
   purchaseValue: number | null;
   /** True when purchaseValue is an ESTIMATE (tiktok assumed $ per result), not platform reported. */
   valueIsEstimated: boolean;
+  /** 3 second video plays (meta: video_view action; tiktok: video_watched_2s). Null when never synced. */
+  videoViews: number | null;
+  /** Video starts (video_play_actions on both platforms). Null when never synced. */
+  videoPlays: number | null;
   /** True when any row in this aggregate has purchases_are_pooled (google). */
   pooled: boolean;
   /** Most recent date with any spend or impressions, for the Delivery pill. */
@@ -64,6 +68,7 @@ export type MetricKey =
   | "impressions"
   | "clicks"
   | "ctr"
+  | "hookrate"
   | "cpc"
   | "cpm"
   | "conv"
@@ -76,6 +81,8 @@ export interface ColumnDef {
   l: string;
   w: number; // px
   a: "flex-start" | "flex-end";
+  /** Optional tooltip on the column header. */
+  tip?: string;
 }
 
 /** Column set copied from the design file (widths and order are law). */
@@ -86,6 +93,13 @@ export const COLUMNS: ColumnDef[] = [
   { k: "impressions", l: "Impressions", w: 125, a: "flex-end" },
   { k: "clicks", l: "Clicks", w: 105, a: "flex-end" },
   { k: "ctr", l: "CTR", w: 95, a: "flex-end" },
+  {
+    k: "hookrate",
+    l: "Hook rate",
+    w: 110,
+    a: "flex-end",
+    tip: "Hook rate = 3 second video plays divided by video starts. TikTok has no 3 second metric, so its 2 second watched count is used there.",
+  },
   { k: "cpc", l: "CPC", w: 100, a: "flex-end" },
   { k: "cpm", l: "CPM", w: 100, a: "flex-end" },
   { k: "conv", l: "Results", w: 110, a: "flex-end" },

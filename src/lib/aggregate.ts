@@ -9,6 +9,8 @@ export function emptyMetrics(): Metrics {
     purchases: 0,
     purchaseValue: null,
     valueIsEstimated: false,
+    videoViews: null,
+    videoPlays: null,
     pooled: false,
     latestActivity: null,
   };
@@ -22,6 +24,8 @@ function addRow(m: Metrics, r: AdRow): void {
   if (r.purchase_value != null) {
     m.purchaseValue = (m.purchaseValue ?? 0) + r.purchase_value;
   }
+  if (r.video_views != null) m.videoViews = (m.videoViews ?? 0) + r.video_views;
+  if (r.video_plays != null) m.videoPlays = (m.videoPlays ?? 0) + r.video_plays;
   if (r.purchases_are_pooled) m.pooled = true;
   if ((r.spend || 0) > 0 || (r.impressions || 0) > 0) {
     if (!m.latestActivity || r.date > m.latestActivity) m.latestActivity = r.date;
@@ -51,6 +55,8 @@ export function sumMetrics(list: Metrics[]): Metrics {
       // per result) is itself an estimate and must be marked as such.
       if (m.valueIsEstimated) out.valueIsEstimated = true;
     }
+    if (m.videoViews != null) out.videoViews = (out.videoViews ?? 0) + m.videoViews;
+    if (m.videoPlays != null) out.videoPlays = (out.videoPlays ?? 0) + m.videoPlays;
     if (m.pooled) out.pooled = true;
     if (m.latestActivity && (!out.latestActivity || m.latestActivity > out.latestActivity)) {
       out.latestActivity = m.latestActivity;
@@ -206,6 +212,8 @@ export function metric(m: Metrics, k: MetricKey): number {
       return m.purchaseValue ?? 0;
     case "ctr":
       return m.impressions ? m.clicks / m.impressions : 0;
+    case "hookrate":
+      return m.videoViews && m.videoPlays ? m.videoViews / m.videoPlays : 0;
     case "cpc":
       return m.clicks ? m.spend / m.clicks : 0;
     case "cpm":
