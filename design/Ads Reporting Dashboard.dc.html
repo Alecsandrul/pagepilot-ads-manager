@@ -1,0 +1,475 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<style>
+  html, body { margin: 0; padding: 0; background: #F4F5F7; }
+  * { box-sizing: border-box; }
+  a { color: #0064E0; text-decoration: none; }
+  a:hover { color: #0055BE; text-decoration: underline; }
+  ::selection { background: #D8E6FB; }
+</style>
+</helmet>
+
+<div style="min-height:100vh;background:#F4F5F7;font-family:'Optimistic Display',system-ui,-apple-system,'Segoe UI',Helvetica,Arial,sans-serif;color:#1C2B33;-webkit-font-smoothing:antialiased;display:flex;flex-direction:column">
+
+  <div style="display:flex;align-items:center;justify-content:space-between;gap:24px;padding:18px 28px 16px;background:#FFFFFF;border-bottom:1px solid #DFE1E6">
+    <div style="display:flex;align-items:baseline;gap:14px">
+      <div style="font-size:18px;font-weight:700;letter-spacing:-0.01em">Ads Reporting</div>
+      <div style="font-size:13px;color:#65676B">All platforms, one report</div>
+    </div>
+    <div style="display:flex;align-items:center;gap:10px">
+      <div style="display:flex;align-items:center;gap:8px;height:34px;padding:0 12px;border:1px solid #CFD2D7;border-radius:8px;font-size:13px;font-weight:500;background:#fff">
+        <span style="width:6px;height:6px;border-radius:50%;background:#1C2B33"></span>
+        <span>3 Aug – 1 Sep 2026</span>
+        <span style="color:#8A8D91;font-size:12px">Last 30 days</span>
+      </div>
+      <div style="display:flex;align-items:center;height:34px;padding:0 14px;border:1px solid #CFD2D7;border-radius:8px;font-size:13px;font-weight:600;background:#fff" style-hover="background:#F4F5F7;cursor:pointer">Columns</div>
+      <div style="display:flex;align-items:center;height:34px;padding:0 14px;border-radius:8px;font-size:13px;font-weight:600;background:#0064E0;color:#fff" style-hover="background:#0055BE;cursor:pointer">Export</div>
+    </div>
+  </div>
+
+  <div style="display:flex;align-items:stretch;gap:4px;padding:0 20px;background:#FFFFFF;border-bottom:1px solid #DFE1E6">
+    <sc-for list="{{ platforms }}" as="p" hint-placeholder-count="3">
+      <div onClick="{{ p.onClick }}" style="display:flex;align-items:center;gap:10px;padding:14px 16px 13px;cursor:pointer;border-bottom:2px solid {{ p.underline }};margin-bottom:-1px" style-hover="background:#F7F8FA">
+        <span style="width:9px;height:9px;border-radius:2px;background:{{ p.dot }}"></span>
+        <span style="font-size:14px;font-weight:600;color:{{ p.color }}">{{ p.label }}</span>
+        <span style="font-size:12px;color:#8A8D91;font-variant-numeric:tabular-nums">{{ p.spend }}</span>
+      </div>
+    </sc-for>
+  </div>
+
+  <sc-if value="{{ showKpis }}" hint-placeholder-val="{{ true }}">
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));background:#FFFFFF;border-bottom:1px solid #DFE1E6">
+      <sc-for list="{{ kpis }}" as="k" hint-placeholder-count="6">
+        <div style="background:#fff;padding:16px 20px 18px;display:flex;flex-direction:column;gap:7px;box-shadow:1px 1px 0 #DFE1E6">
+          <div style="font-size:11.5px;font-weight:600;letter-spacing:0.04em;text-transform:uppercase;color:#8A8D91">{{ k.label }}</div>
+          <div style="font-size:22px;font-weight:600;letter-spacing:-0.02em;font-variant-numeric:tabular-nums;white-space:nowrap">{{ k.value }}</div>
+          <div style="font-size:12px;font-weight:500;color:{{ k.deltaColor }};white-space:nowrap">{{ k.delta }}</div>
+        </div>
+      </sc-for>
+    </div>
+  </sc-if>
+
+  <div style="padding:18px 20px 28px;flex:1;display:flex;flex-direction:column;min-height:0">
+    <div style="background:#fff;border:1px solid #DFE1E6;border-radius:12px;overflow:hidden;display:flex;flex-direction:column;min-height:0;box-shadow:0 1px 2px rgba(28,43,51,0.05)">
+
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:16px;padding:10px 14px;border-bottom:1px solid #EBEDF0">
+        <div style="display:flex;align-items:center;gap:6px;background:#F0F2F5;padding:3px;border-radius:9px">
+          <sc-for list="{{ levels }}" as="l" hint-placeholder-count="3">
+            <div onClick="{{ l.onClick }}" style="display:flex;align-items:center;gap:7px;padding:7px 13px;border-radius:7px;cursor:pointer;background:{{ l.bg }};box-shadow:{{ l.shadow }}">
+              <span style="font-size:13px;font-weight:600;color:{{ l.color }}">{{ l.label }}</span>
+              <span style="font-size:11.5px;color:#8A8D91;font-variant-numeric:tabular-nums">{{ l.count }}</span>
+            </div>
+          </sc-for>
+        </div>
+        <div style="display:flex;align-items:center;gap:10px">
+          <sc-if value="{{ hasParent }}">
+            <div style="display:flex;align-items:center;gap:8px;height:32px;padding:0 6px 0 11px;border:1px solid #BBD6F7;background:#EBF3FE;border-radius:8px;font-size:12.5px;font-weight:500;color:#0055BE">
+              <span>{{ parentLabel }}</span>
+              <span onClick="{{ clearParent }}" style="display:flex;align-items:center;justify-content:center;width:20px;height:20px;border-radius:5px;cursor:pointer;color:#0064E0;font-size:14px" style-hover="background:#DCEAFD">×</span>
+            </div>
+          </sc-if>
+          <input value="{{ query }}" onChange="{{ onSearch }}" placeholder="Search by name…" style="height:32px;width:230px;padding:0 11px;border:1px solid #CFD2D7;border-radius:8px;font-family:inherit;font-size:13px;outline:none;color:#1C2B33" style-focus="border-color:#0064E0" />
+        </div>
+      </div>
+
+      <sc-if value="{{ hasSelection }}">
+        <div style="display:flex;align-items:center;gap:16px;padding:9px 16px;background:#1C2B33;color:#fff">
+          <span style="font-size:13px;font-weight:600">{{ selectionLabel }}</span>
+          <span style="font-size:13px;color:#A7ADB2">Edit budget</span>
+          <span style="font-size:13px;color:#A7ADB2">Duplicate</span>
+          <span style="font-size:13px;color:#A7ADB2">Turn off</span>
+          <span onClick="{{ clearSelection }}" style="margin-left:auto;font-size:13px;font-weight:500;cursor:pointer;color:#fff" style-hover="text-decoration:underline">Deselect all</span>
+        </div>
+      </sc-if>
+
+      <div style="flex:1;min-height:0;overflow:auto">
+        <div style="min-width:{{ tableWidth }}">
+
+          <div style="display:flex;position:sticky;top:0;z-index:3;background:#FAFBFC;border-bottom:1px solid #DFE1E6">
+            <div style="position:sticky;left:0;z-index:2;width:340px;flex:0 0 340px;background:#FAFBFC;border-right:1px solid #EBEDF0;display:flex;align-items:center;gap:11px;padding:0 14px;height:42px">
+              <span onClick="{{ toggleAll }}" style="width:15px;height:15px;border:1.5px solid {{ allBorder }};background:{{ allBg }};border-radius:4px;cursor:pointer;display:flex;align-items:center;justify-content:center;color:#fff;font-size:10px;line-height:1">{{ allMark }}</span>
+              <span style="font-size:12px;font-weight:600;color:#5A5F66">{{ nameHeader }}</span>
+            </div>
+            <sc-for list="{{ columns }}" as="c" hint-placeholder-count="12">
+              <div onClick="{{ c.onSort }}" style="flex:0 0 {{ c.w }};width:{{ c.w }};height:42px;display:flex;align-items:center;justify-content:{{ c.justify }};gap:5px;padding:0 14px;cursor:pointer" style-hover="background:#F0F2F5">
+                <span style="font-size:12px;font-weight:600;color:{{ c.color }};white-space:nowrap">{{ c.label }}</span>
+                <span style="font-size:10px;color:#0064E0">{{ c.arrow }}</span>
+              </div>
+            </sc-for>
+          </div>
+
+          <div style="display:flex;border-bottom:1px solid #DFE1E6;background:#FFFFFF">
+            <div style="position:sticky;left:0;z-index:2;width:340px;flex:0 0 340px;background:#FFFFFF;border-right:1px solid #EBEDF0;display:flex;align-items:center;padding:0 14px 0 40px;height:44px;font-size:13px;font-weight:700">{{ totalsLabel }}</div>
+            <sc-for list="{{ totals }}" as="c" hint-placeholder-count="12">
+              <div style="flex:0 0 {{ c.w }};width:{{ c.w }};height:44px;display:flex;align-items:center;justify-content:{{ c.justify }};padding:0 14px;font-size:13px;font-weight:600;font-variant-numeric:tabular-nums;color:#1C2B33;white-space:nowrap">{{ c.v }}</div>
+            </sc-for>
+          </div>
+
+          <sc-for list="{{ rows }}" as="r" hint-placeholder-count="10">
+            <div style="display:flex;border-bottom:1px solid #F0F2F5;background:{{ r.rowBg }}" style-hover="background:#F7F8FA">
+              <div style="position:sticky;left:0;z-index:2;width:340px;flex:0 0 340px;background:{{ r.rowBg }};border-right:1px solid #EBEDF0;display:flex;align-items:center;gap:11px;padding:{{ r.pad }};height:{{ r.h }}">
+                <span onClick="{{ r.onSelect }}" style="flex:0 0 15px;width:15px;height:15px;border:1.5px solid {{ r.checkBorder }};background:{{ r.checkBg }};border-radius:4px;cursor:pointer;display:flex;align-items:center;justify-content:center;color:#fff;font-size:10px;line-height:1">{{ r.checkMark }}</span>
+                <span style="flex:0 0 7px;width:7px;height:7px;border-radius:50%;background:{{ r.statusDot }}"></span>
+                <span style="min-width:0;display:flex;flex-direction:column;gap:2px">
+                  <span onClick="{{ r.onDrill }}" style="font-size:13.5px;font-weight:600;color:{{ r.nameColor }};cursor:{{ r.nameCursor }};white-space:nowrap;overflow:hidden;text-overflow:ellipsis" style-hover="text-decoration:{{ r.nameUnderline }}">{{ r.name }}</span>
+                  <span style="font-size:11.5px;color:#8A8D91;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ r.sub }}</span>
+                </span>
+              </div>
+              <sc-for list="{{ r.cells }}" as="c" hint-placeholder-count="12">
+                <div style="flex:0 0 {{ c.w }};width:{{ c.w }};height:{{ c.h }};display:flex;align-items:center;justify-content:{{ c.justify }};padding:0 14px">
+                  <sc-if value="{{ c.pill }}">
+                    <span style="display:inline-flex;align-items:center;padding:3px 9px;border-radius:6px;font-size:12px;font-weight:600;color:{{ c.color }};background:{{ c.bg }};white-space:nowrap">{{ c.v }}</span>
+                  </sc-if>
+                  <sc-if value="{{ c.plain }}">
+                    <span style="font-size:13px;font-variant-numeric:tabular-nums;color:{{ c.color }};white-space:nowrap">{{ c.v }}</span>
+                  </sc-if>
+                </div>
+              </sc-for>
+            </div>
+          </sc-for>
+
+          <sc-if value="{{ isEmpty }}">
+            <div style="padding:56px 20px;text-align:center;color:#8A8D91;font-size:13.5px">No rows match your filters.</div>
+          </sc-if>
+        </div>
+      </div>
+
+      <div style="display:flex;align-items:center;justify-content:space-between;padding:11px 16px;border-top:1px solid #EBEDF0;background:#FAFBFC;font-size:12.5px;color:#65676B">
+        <span>{{ footerLeft }}</span>
+        <span>Attribution setting: 7-day click, 1-day view</span>
+      </div>
+    </div>
+  </div>
+</div>
+
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;defaultPlatform&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;meta&quot;,&quot;tiktok&quot;,&quot;google&quot;],&quot;default&quot;:&quot;meta&quot;,&quot;tsType&quot;:&quot;string&quot;,&quot;section&quot;:&quot;Data&quot;},&quot;currency&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;USD&quot;,&quot;EUR&quot;,&quot;RON&quot;],&quot;default&quot;:&quot;USD&quot;,&quot;tsType&quot;:&quot;string&quot;,&quot;section&quot;:&quot;Data&quot;},&quot;showKpis&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:true,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;Layout&quot;},&quot;density&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;compact&quot;,&quot;comfortable&quot;],&quot;default&quot;:&quot;compact&quot;,&quot;tsType&quot;:&quot;string&quot;,&quot;section&quot;:&quot;Layout&quot;}}">
+class Component extends DCLogic {
+  constructor(p) {
+    super(p);
+    this.state = {
+      platform: p.defaultPlatform || "meta",
+      level: 0,
+      sort: { key: "spend", dir: "desc" },
+      q: "",
+      parent: null,
+      sel: {}
+    };
+    this.data = this.build();
+  }
+
+  h(s) {
+    let x = 2166136261;
+    for (let i = 0; i < s.length; i++) { x ^= s.charCodeAt(i); x = Math.imul(x, 16777619); }
+    return (x >>> 0) / 4294967296;
+  }
+  r(s, a, b) { return a + this.h(s) * (b - a); }
+
+  spec() {
+    const g = (n, d, st, ads) => ({ n, d, st, ads });
+    return {
+      meta: {
+        label: "Meta Ads", dot: "#0064E0",
+        terms: ["Campaigns", "Ad sets", "Ads"],
+        campaigns: [
+          { n: "PROSP | Advantage+ Shopping", o: "Sales · ASC", st: "active", b: 4500, bt: "daily", g: [
+            g("Broad · US 18-55", "Advantage+ audience · all placements", "active", ["Video 15s — Hook \"Stop overpaying\"", "Carousel — Best sellers", "Static — 20% off"]),
+            g("Lookalike 1% purchasers", "LAL 1% · 180 days", "active", ["Video 15s — Hook \"Stop overpaying\"", "Collection — Main feed"]) ] },
+          { n: "RMKT | Site visitors 30d", o: "Sales · Conversions", st: "active", b: 1200, bt: "daily", g: [
+            g("Abandoned cart 7d", "Website · AddToCart excl. Purchase", "active", ["DPA — Abandoned cart", "Static — Free shipping"]),
+            g("Product viewers 30d", "Website · ViewContent", "active", ["DPA — Viewed products", "Carousel — Customer reviews"]) ] },
+          { n: "LEADGEN | Free consultation", o: "Leads", st: "active", b: 900, bt: "daily", g: [
+            g("Instant form · US", "Native form · B2B interests", "active", ["Static — Free audit", "Video 20s — Testimonial"]) ] },
+          { n: "BRAND | Video views Q3", o: "Awareness · ThruPlay", st: "active", b: 600, bt: "daily", g: [
+            g("Reels-first 25-45", "Reels & Stories only", "active", ["Reels 9:16 — Behind the scenes", "Reels 9:16 — UGC creator"]) ] },
+          { n: "BF | Waitlist teaser", o: "Sales · Conversions", st: "paused", b: 30000, bt: "lifetime", g: [
+            g("Warm audiences", "Engagers 365d", "paused", ["Static — Join the BF waitlist"]) ] }
+        ]
+      },
+      tiktok: {
+        label: "TikTok Ads", dot: "#FE2C55",
+        terms: ["Campaigns", "Ad groups", "Ads"],
+        campaigns: [
+          { n: "TT | Smart+ Catalog Sales", o: "Product sales · Smart+", st: "active", b: 2600, bt: "daily", g: [
+            g("Smart+ automatic", "Automatic targeting · US", "active", ["Spark Ad — @sophie.style", "Video 21s — Unboxing", "Video 15s — Product demo"]),
+            g("Interests · Beauty & Fashion", "Interests + behavior 15d", "active", ["Spark Ad — @mike.tech", "Video 18s — Before/After"]) ] },
+          { n: "TT | Spark Ads UGC creators", o: "Web traffic", st: "active", b: 1400, bt: "daily", g: [
+            g("Creator pool #1", "3 creators · CPC bid", "active", ["Spark Ad — Creator A", "Spark Ad — Creator B"]),
+            g("Creator pool #2", "2 creators · hook test", "active", ["Spark Ad — Creator C", "Spark Ad — Creator D"]) ] },
+          { n: "TT | Retargeting VV 75%", o: "Sales · Retargeting", st: "active", b: 700, bt: "daily", g: [
+            g("Video viewers 75% · 14d", "Custom audience", "active", ["Video 12s — Limited offer", "Carousel — Top 5 products"]) ] },
+          { n: "TT | Lead Gen instant form", o: "Leads", st: "active", b: 500, bt: "daily", g: [
+            g("Instant form · native", "TikTok lead form", "active", ["Video 25s — Explainer"]) ] },
+          { n: "TT | Creative test Q4", o: "Sales · CBO", st: "paused", b: 12000, bt: "lifetime", g: [
+            g("4-hook test", "Campaign budget optimization", "paused", ["Video 15s — Hook 1", "Video 15s — Hook 2"]) ] }
+        ]
+      },
+      google: {
+        label: "Google Ads", dot: "#34A853",
+        terms: ["Campaigns", "Ad groups", "Ads"],
+        campaigns: [
+          { n: "Search | Brand exact", o: "Search · tROAS", st: "active", b: 350, bt: "daily", g: [
+            g("Brand — exact", "12 keywords · exact", "active", ["RSA — Official store", "RSA — Brand + shipping"]) ] },
+          { n: "PMax | Main feed", o: "Performance Max", st: "active", b: 3200, bt: "daily", g: [
+            g("Asset group — Best sellers", "Merchant Center feed · US", "active", ["Asset group — Best sellers", "Asset group — New arrivals"]),
+            g("Asset group — Clearance", "Custom label 2", "active", ["Asset group — Outlet"]) ] },
+          { n: "Search | Generic non-brand", o: "Search · Max clicks", st: "active", b: 1800, bt: "daily", g: [
+            g("Core category", "48 keywords · phrase", "active", ["RSA — Category + price", "RSA — Category + warranty"]),
+            g("Competitors", "9 keywords · exact", "paused", ["RSA — Alternative to…"]) ] },
+          { n: "Demand Gen | Discovery Q3", o: "Demand Gen", st: "active", b: 900, bt: "daily", g: [
+            g("Similar to purchasers", "Custom segments", "active", ["Video 15s — YouTube Shorts", "Image — Discover feed"]) ] },
+          { n: "Shopping | Standard remnant", o: "Standard Shopping", st: "paused", b: 400, bt: "daily", g: [
+            g("All products", "Default product group", "paused", ["Product group — All products"]) ] }
+        ]
+      }
+    };
+  }
+
+  build() {
+    const spec = this.spec();
+    const out = {};
+    const DAYS = 30;
+    const cpmRange = { meta: [11, 34], tiktok: [6, 19], google: [22, 78] };
+    const ctrRange = { meta: [0.008, 0.026], tiktok: [0.006, 0.019], google: [0.021, 0.092] };
+    Object.keys(spec).forEach((pk) => {
+      const p = spec[pk];
+      const campaigns = p.campaigns.map((c, ci) => {
+        const cid = pk + "-c" + ci;
+        const paused = c.st === "paused";
+        const leadGen = c.o === "Leads";
+        // spend derives from the budget so the two columns agree
+        const pacing = paused ? this.r(cid + "pp", 0.08, 0.24) : this.r(cid + "pa", 0.55, 0.97);
+        const campaignSpend = c.bt === "lifetime" ? c.b * pacing : c.b * DAYS * pacing;
+        const allAds = [];
+        c.g.forEach((gr, gi) => gr.ads.forEach((an, ai) => allAds.push({ gi, ai, w: this.r(cid + "-" + gi + "-" + ai + "w", 0.45, 1.85) })));
+        const wSum = allAds.reduce((a, x) => a + x.w, 0);
+        const groups = c.g.map((gr, gi) => {
+          const gid = cid + "-g" + gi;
+          const grPaused = paused || gr.st === "paused";
+          const ads = gr.ads.map((an, ai) => {
+            const id = gid + "-a" + ai;
+            const ref = allAds.find((x) => x.gi === gi && x.ai === ai);
+            const share = (ref.w / wSum) * (grPaused && !paused ? 0.3 : 1);
+            const spend = campaignSpend * share;
+            const cpm = this.r(id + "m", cpmRange[pk][0], cpmRange[pk][1]);
+            const impressions = Math.round((spend / cpm) * 1000);
+            const ctr = this.r(id + "t", ctrRange[pk][0], ctrRange[pk][1]);
+            const clicks = Math.round(impressions * ctr);
+            const cvr = leadGen ? this.r(id + "v", 0.03, 0.14) : this.r(id + "v", 0.004, 0.055);
+            const conv = Math.round(clicks * cvr);
+            const roas = this.r(id + "R", 0.75, 4.4);
+            return { id, name: an, sub: gr.n, status: grPaused ? "paused" : "active", noRev: leadGen,
+              m: { impressions, clicks, spend, conv, revenue: leadGen ? 0 : spend * roas }, campaignId: cid, groupId: gid };
+          });
+          return { id: gid, name: gr.n, sub: gr.d, status: grPaused ? "paused" : "active", noRev: leadGen,
+            budget: null, bt: null, ads, campaignId: cid, m: this.agg(ads.map((a) => a.m)) };
+        });
+        const ads = groups.reduce((acc, g2) => acc.concat(g2.ads), []);
+        return { id: cid, name: c.n, sub: c.o, status: c.st, budget: c.b, bt: c.bt, groups, ads, noRev: leadGen,
+          m: this.agg(groups.map((g2) => g2.m)) };
+      });
+      out[pk] = { key: pk, label: p.label, dot: p.dot, terms: p.terms, campaigns,
+        groups: campaigns.reduce((a, c) => a.concat(c.groups), []),
+        ads: campaigns.reduce((a, c) => a.concat(c.ads), []) };
+      out[pk].m = this.agg(campaigns.map((c) => c.m));
+    });
+    return out;
+  }
+
+  agg(list) {
+    const t = { impressions: 0, clicks: 0, spend: 0, conv: 0, revenue: 0 };
+    list.forEach((m) => { t.impressions += m.impressions; t.clicks += m.clicks; t.spend += m.spend; t.conv += m.conv; t.revenue += m.revenue; });
+    return t;
+  }
+
+  cur() { return this.props.currency || "USD"; }
+  fxRate() { return { USD: 1, EUR: 0.92, RON: 4.6 }[this.cur()]; }
+  money(v, dec) {
+    const x = v * this.fxRate();
+    const s = new Intl.NumberFormat("en-US", { minimumFractionDigits: dec || 0, maximumFractionDigits: dec || 0 }).format(x);
+    const sym = { USD: "$", EUR: "€", RON: "" }[this.cur()];
+    return this.cur() === "RON" ? s + " RON" : sym + s;
+  }
+  num(v) { return new Intl.NumberFormat("en-US").format(Math.round(v)); }
+  pct(v) { return new Intl.NumberFormat("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(v * 100) + "%"; }
+  dec(v, d) { return new Intl.NumberFormat("en-US", { minimumFractionDigits: d, maximumFractionDigits: d }).format(v); }
+
+  colDefs() {
+    return [
+      { k: "status", l: "Delivery", w: "130px", a: "flex-start" },
+      { k: "budget", l: "Budget", w: "150px", a: "flex-end" },
+      { k: "spend", l: "Amount spent", w: "140px", a: "flex-end" },
+      { k: "impressions", l: "Impressions", w: "125px", a: "flex-end" },
+      { k: "clicks", l: "Clicks", w: "105px", a: "flex-end" },
+      { k: "ctr", l: "CTR", w: "95px", a: "flex-end" },
+      { k: "cpc", l: "CPC", w: "100px", a: "flex-end" },
+      { k: "cpm", l: "CPM", w: "100px", a: "flex-end" },
+      { k: "conv", l: "Results", w: "110px", a: "flex-end" },
+      { k: "cpa", l: "Cost per result", w: "150px", a: "flex-end" },
+      { k: "revenue", l: "Conversion value", w: "160px", a: "flex-end" },
+      { k: "roas", l: "ROAS", w: "100px", a: "flex-end" }
+    ];
+  }
+
+  metric(item, k) {
+    const m = item.m;
+    if (k === "spend") return m.spend;
+    if (k === "impressions") return m.impressions;
+    if (k === "clicks") return m.clicks;
+    if (k === "conv") return m.conv;
+    if (k === "revenue") return m.revenue;
+    if (k === "ctr") return m.impressions ? m.clicks / m.impressions : 0;
+    if (k === "cpc") return m.clicks ? m.spend / m.clicks : 0;
+    if (k === "cpm") return m.impressions ? (m.spend / m.impressions) * 1000 : 0;
+    if (k === "cpa") return m.conv ? m.spend / m.conv : 0;
+    if (k === "roas") return m.spend ? m.revenue / m.spend : 0;
+    if (k === "budget") return item.budget || 0;
+    if (k === "status") return item.status === "active" ? 1 : 0;
+    return 0;
+  }
+
+  fmt(item, k) {
+    if (item.noRev && (k === "revenue" || k === "roas")) return "—";
+    const v = this.metric(item, k);
+    if (k === "spend" || k === "revenue" || k === "cpa") return this.money(v, 0);
+    if (k === "cpc" || k === "cpm") return this.money(v, 2);
+    if (k === "impressions" || k === "clicks" || k === "conv") return this.num(v);
+    if (k === "ctr") return this.pct(v);
+    if (k === "roas") return this.dec(v, 2) + "x";
+    if (k === "budget") return item.budget ? this.money(item.budget, 0) + " / " + item.bt : "—";
+    return "";
+  }
+
+  renderVals() {
+    const st = this.state;
+    const d = this.data[st.platform];
+    const compact = (this.props.density || "compact") === "compact";
+    const rowH = compact ? "48px" : "62px";
+
+    const platforms = Object.keys(this.data).map((k) => {
+      const p = this.data[k];
+      const on = k === st.platform;
+      return { label: p.label, dot: p.dot, spend: this.money(p.m.spend, 0),
+        color: on ? "#1C2B33" : "#65676B",
+        underline: on ? "#0064E0" : "transparent",
+        onClick: () => this.setState({ platform: k, parent: null, sel: {}, q: "" }) };
+    });
+
+    const t = d.m;
+    const kpis = [
+      { label: "Amount spent", value: this.money(t.spend, 0), k: "s" },
+      { label: "Impressions", value: this.num(t.impressions), k: "i" },
+      { label: "Clicks", value: this.num(t.clicks), k: "c" },
+      { label: "CTR", value: this.pct(t.clicks / t.impressions), k: "t" },
+      { label: "Results", value: this.num(t.conv), k: "r" },
+      { label: "ROAS", value: this.dec(t.revenue / t.spend, 2) + "x", k: "o" }
+    ].map((k) => {
+      const dv = this.r(st.platform + k.k + "d", -14, 26);
+      const up = dv >= 0;
+      return { label: k.label, value: k.value,
+        delta: (up ? "+" : "−") + this.dec(Math.abs(dv), 1) + "% vs. prev.",
+        deltaColor: up ? "#1E7B4D" : "#C0392B" };
+    });
+
+    let items;
+    if (st.level === 0) items = d.campaigns;
+    else if (st.level === 1) items = st.parent ? d.groups.filter((g) => g.campaignId === st.parent.id) : d.groups;
+    else items = st.parent
+      ? d.ads.filter((a) => (st.parent.level === 0 ? a.campaignId === st.parent.id : a.groupId === st.parent.id))
+      : d.ads;
+
+    const q = st.q.trim().toLowerCase();
+    if (q) items = items.filter((i) => (i.name + " " + (i.sub || "")).toLowerCase().indexOf(q) >= 0);
+    const dir = st.sort.dir === "asc" ? 1 : -1;
+    items = items.slice().sort((a, b) => (this.metric(a, st.sort.key) - this.metric(b, st.sort.key)) * dir);
+
+    const cols = this.colDefs();
+    const columns = cols.map((c) => ({
+      label: c.l, w: c.w, justify: c.a,
+      color: st.sort.key === c.k ? "#1C2B33" : "#5A5F66",
+      arrow: st.sort.key === c.k ? (st.sort.dir === "asc" ? "▲" : "▼") : "",
+      onSort: () => this.setState({ sort: { key: c.k, dir: st.sort.key === c.k && st.sort.dir === "desc" ? "asc" : "desc" } })
+    }));
+
+    const rows = items.map((it) => {
+      const on = !!st.sel[it.id];
+      const active = it.status === "active";
+      const cells = cols.map((c) => {
+        if (c.k === "status") return { w: c.w, h: rowH, justify: c.a, pill: true, plain: false,
+          v: active ? "Active" : "Off", color: active ? "#1E7B4D" : "#65676B", bg: active ? "#E4F3EA" : "#F0F2F5" };
+        let color = "#1C2B33";
+        if (c.k === "roas" && !it.noRev) { const v = this.metric(it, "roas"); color = v >= 2 ? "#1E7B4D" : v < 1.2 ? "#C0392B" : "#1C2B33"; }
+        if ((c.k === "budget" && !it.budget) || (it.noRev && (c.k === "revenue" || c.k === "roas"))) color = "#B0B3B8";
+        return { w: c.w, h: rowH, justify: c.a, pill: false, plain: true, v: this.fmt(it, c.k), color: color, bg: "transparent" };
+      });
+      const drillable = st.level < 2;
+      return { name: it.name, sub: it.sub, cells, pad: "0 14px", h: rowH, rowBg: on ? "#EBF3FE" : "#FFFFFF",
+        statusDot: active ? "#31A24C" : "#C4C9CE",
+        checkBg: on ? "#0064E0" : "#FFFFFF", checkBorder: on ? "#0064E0" : "#C4C9CE", checkMark: on ? "✓" : "",
+        nameColor: drillable ? "#0064E0" : "#1C2B33",
+        nameCursor: drillable ? "pointer" : "default",
+        nameUnderline: drillable ? "underline" : "none",
+        onSelect: () => this.setState((s) => {
+          const sel = Object.assign({}, s.sel);
+          if (sel[it.id]) delete sel[it.id]; else sel[it.id] = true;
+          return { sel };
+        }),
+        onDrill: () => { if (drillable) this.setState({ level: st.level + 1, parent: { id: it.id, name: it.name, level: st.level }, sel: {} }); }
+      };
+    });
+
+    const totalsAgg = { m: this.agg(items.map((i) => i.m)), budget: null, bt: null, status: "active" };
+    const totals = cols.map((c) => ({ w: c.w, justify: c.a,
+      v: c.k === "status" || c.k === "budget" ? "" : this.fmt(totalsAgg, c.k) }));
+
+    const levels = d.terms.map((label, i) => {
+      const on = i === st.level;
+      const count = i === 0 ? d.campaigns.length : i === 1 ? d.groups.length : d.ads.length;
+      return { label, count, bg: on ? "#FFFFFF" : "transparent",
+        shadow: on ? "0 1px 2px rgba(28,43,51,0.14)" : "none",
+        color: on ? "#1C2B33" : "#65676B",
+        onClick: () => this.setState({ level: i, parent: i === 0 ? null : st.parent, sel: {} }) };
+    });
+
+    const selCount = Object.keys(st.sel).length;
+    const allOn = items.length > 0 && items.every((i) => st.sel[i.id]);
+    const totalW = 340 + cols.reduce((a, c) => a + parseInt(c.w, 10), 0);
+
+    return {
+      platforms, kpis, levels, columns, rows, totals,
+      showKpis: this.props.showKpis !== false,
+      query: st.q,
+      onSearch: (e) => this.setState({ q: e.target.value }),
+      nameHeader: d.terms[st.level],
+      totalsLabel: "Total · " + items.length + " " + d.terms[st.level].toLowerCase(),
+      tableWidth: totalW + "px",
+      isEmpty: items.length === 0,
+      hasParent: !!st.parent && st.level > 0,
+      parentLabel: st.parent ? st.parent.name : "",
+      clearParent: () => this.setState({ parent: null }),
+      hasSelection: selCount > 0,
+      selectionLabel: selCount + (selCount === 1 ? " row selected" : " rows selected"),
+      clearSelection: () => this.setState({ sel: {} }),
+      allBg: allOn ? "#0064E0" : "transparent", allBorder: allOn ? "#0064E0" : "#C4C9CE",
+      allMark: allOn ? "✓" : "",
+      toggleAll: () => this.setState(() => {
+        if (allOn) return { sel: {} };
+        const sel = {};
+        items.forEach((i) => { sel[i.id] = true; });
+        return { sel };
+      }),
+      footerLeft: items.length + " of " + (st.level === 0 ? d.campaigns.length : st.level === 1 ? d.groups.length : d.ads.length) + " rows · " + this.cur()
+    };
+  }
+}
+</script>
+</body>
+</html>
