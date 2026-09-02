@@ -47,8 +47,13 @@ def load_env(path=ENV_PATH):
 
 def get(url, params):
     qs = urllib.parse.urlencode(params)
-    with urllib.request.urlopen(f"{url}?{qs}", timeout=60) as r:
-        return json.loads(r.read())
+    try:
+        with urllib.request.urlopen(f"{url}?{qs}", timeout=60) as r:
+            return json.loads(r.read())
+    except urllib.error.HTTPError as e:
+        # Surface the Graph error body: rate-limit codes (4/17/613) live
+        # there, and the backfill driver greps stderr for them.
+        raise RuntimeError(f"HTTP {e.code}: {e.read().decode(errors='replace')[:400]}") from None
 
 
 def action_value(items, action_type):

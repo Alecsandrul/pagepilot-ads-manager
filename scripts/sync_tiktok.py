@@ -48,8 +48,13 @@ def get(token, endpoint, params):
     qs = urllib.parse.urlencode(params)
     req = urllib.request.Request(f"{BASE}{endpoint}?{qs}",
                                  headers={"Access-Token": token})
-    with urllib.request.urlopen(req, timeout=60) as r:
-        data = json.loads(r.read())
+    try:
+        with urllib.request.urlopen(req, timeout=60) as r:
+            data = json.loads(r.read())
+    except urllib.error.HTTPError as e:
+        # Surface status + body: HTTP 429 / code 40100 are the throttle
+        # markers the backfill driver greps stderr for.
+        raise RuntimeError(f"HTTP {e.code}: {e.read().decode(errors='replace')[:400]}") from None
     if data.get("code") != 0:
         raise RuntimeError(f"{endpoint}: code {data.get('code')} {data.get('message')}")
     return data["data"]
