@@ -1,5 +1,5 @@
 import { fmtCell, roasColor } from "../lib/display";
-import { EMPTY } from "../lib/format";
+import { EMPTY, money } from "../lib/format";
 import type {
   ColumnDef,
   Currency,
@@ -46,8 +46,6 @@ interface Props {
   currency: Currency;
   density: Density;
   notice: string | null;
-  /** True on the google tab: Results values are pooled conversions. */
-  pooledPlatform: boolean;
   /** Tooltip for estimated Conversion value / ROAS cells (tiktok assumed value). */
   estTooltip: string;
   footerRight: string;
@@ -104,7 +102,6 @@ export default function AdsTable(props: Props) {
     currency,
     density,
     notice,
-    pooledPlatform,
     estTooltip,
     footerRight,
   } = props;
@@ -135,6 +132,26 @@ export default function AdsTable(props: Props) {
         </span>
       );
     }
+    if (c.k === "budget") {
+      // Budget renders where the entity OWNS one (entity_budgets); a row
+      // that owns none explains itself ("CBO" under a campaign budget,
+      // "Ad set budgets" on an ABO campaign) or shows the placeholder.
+      if (e.budget) {
+        return (
+          <span style={{ fontSize: 13, fontVariantNumeric: "tabular-nums", color: "#1C2B33", whiteSpace: "nowrap" }}>
+            {money(e.budget.amount, 0, currency)}
+            <span style={{ fontSize: 10.5, color: "#8A8D91", marginLeft: 5 }}>
+              {e.budget.type === "daily" ? "daily" : "lifetime"}
+            </span>
+          </span>
+        );
+      }
+      return (
+        <span style={{ fontSize: e.budgetNote ? 12 : 13, color: e.budgetNote ? "#8A8D91" : "#B0B3B8", whiteSpace: "nowrap" }}>
+          {e.budgetNote ?? EMPTY}
+        </span>
+      );
+    }
     const v = fmtCell(e.m, c.k, currency);
     const isEst = (c.k === "revenue" || c.k === "roas") && e.m.valueIsEstimated && v !== EMPTY;
     let color = "#1C2B33";
@@ -149,7 +166,7 @@ export default function AdsTable(props: Props) {
         title={
           isEst
             ? estTooltip
-            : pooledPlatform && (c.k === "conv" || c.k === "cpa") && v !== EMPTY
+            : e.m.pooled && (c.k === "conv" || c.k === "cpa") && v !== EMPTY
               ? "Pooled conversions, not purchases"
               : undefined
         }
@@ -162,7 +179,7 @@ export default function AdsTable(props: Props) {
       >
         {v}
         {isEst && <span style={{ fontSize: 10.5, color: "#8A8D91", marginLeft: 5 }}>est</span>}
-        {pooledPlatform && c.k === "conv" && v !== EMPTY && (
+        {e.m.pooled && c.k === "conv" && v !== EMPTY && (
           <span style={{ fontSize: 10.5, color: "#8A8D91", marginLeft: 5 }}>pooled</span>
         )}
       </span>

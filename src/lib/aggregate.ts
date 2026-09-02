@@ -1,4 +1,4 @@
-import type { AdRow, Entity, Level, Metrics, MetricKey, Platform } from "./types";
+import type { AdRow, BudgetRow, Entity, Level, Metrics, MetricKey, Platform } from "./types";
 import { PLATFORM_META } from "./types";
 
 export function emptyMetrics(): Metrics {
@@ -182,7 +182,7 @@ export function buildTree(platform: Platform, rows: AdRow[], opts?: BuildOpts): 
       } else if (platform === "google") {
         e.sub = "Campaign level data";
         e.grainTip =
-          "Google is synced at campaign level only, so ad group and ad views would repeat this row.";
+          "This campaign reports campaign totals only: either a Performance Max style campaign the API cannot split by ad, or days synced before the ad grain sync of 2026-09-02.";
       } else {
         e.sub = "Reports at campaign level";
       }
@@ -210,6 +210,36 @@ export function buildTree(platform: Platform, rows: AdRow[], opts?: BuildOpts): 
     campaignGrainOnly,
     m: sumMetrics(campaigns.map((c) => c.m)),
   };
+}
+
+/**
+ * Attach current budgets (entity_budgets) to the entities that own them.
+ * Where an entity owns none, a note explains why: an adset under a campaign
+ * budget shows "CBO", a campaign whose adsets own the budgets shows
+ * "Ad set budgets". Ads never own budgets.
+ */
+export function applyBudgets(tree: PlatformTree, budgets: BudgetRow[]): void {
+  const camp = new Map<string, BudgetRow>();
+  const adset = new Map<string, BudgetRow>();
+  const campaignsWithAdsetBudgets = new Set<string>();
+  for (const b of budgets) {
+    if (b.platform !== tree.platform) continue;
+    if (b.level === "campaign") camp.set(b.entity_id, b);
+    else {
+      adset.set(b.entity_id, b);
+      if (b.campaign_id) campaignsWithAdsetBudgets.add(b.campaign_id);
+    }
+  }
+  for (const e of tree.campaigns) {
+    const b = camp.get(e.id);
+    if (b) e.budget = { amount: b.budget, type: b.budget_type };
+    else if (campaignsWithAdsetBudgets.has(e.id)) e.budgetNote = "Ad set budgets";
+  }
+  for (const g of tree.groups) {
+    const b = adset.get(g.id);
+    if (b) g.budget = { amount: b.budget, type: b.budget_type };
+    else if (camp.has(g.campaignId)) g.budgetNote = "CBO";
+  }
 }
 
 /** Derived metric value for sorting and display. */

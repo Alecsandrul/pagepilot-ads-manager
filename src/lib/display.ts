@@ -4,7 +4,8 @@ import type { Currency, Metrics, MetricKey } from "./types";
 
 /**
  * Format a metric cell exactly like the design's fmt().
- * Budget is always the placeholder (budgets are not synced yet).
+ * Budget cells are rendered by AdsTable from entity_budgets; here the
+ * budget key is only a placeholder fallback.
  * Conversion value and ROAS are the placeholder where no purchase_value
  * exists (tiktok, and any entity with no valued rows).
  */
