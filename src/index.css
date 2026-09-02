@@ -1,0 +1,84 @@
+/* Base styles matching design/Ads Reporting Dashboard.dc.html */
+html,
+body {
+  margin: 0;
+  padding: 0;
+  background: #f4f5f7;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  font-family: "Optimistic Display", system-ui, -apple-system, "Segoe UI", Helvetica, Arial,
+    sans-serif;
+  color: #1c2b33;
+  -webkit-font-smoothing: antialiased;
+}
+
+a {
+  color: #0064e0;
+  text-decoration: none;
+}
+a:hover {
+  color: #0055be;
+  text-decoration: underline;
+}
+::selection {
+  background: #d8e6fb;
+}
+
+input,
+button,
+select {
+  font-family: inherit;
+}
+
+/* Hover states (the design uses style-hover attributes; real CSS here). */
+.btn-secondary:hover {
+  background: #f4f5f7 !important;
+  cursor: pointer;
+}
+.btn-primary:hover {
+  background: #0055be !important;
+  cursor: pointer;
+}
+.tab-hover:hover {
+  background: #f7f8fa;
+}
+.col-head:hover {
+  background: #f0f2f5;
+}
+.chip-x:hover {
+  background: #dceafd;
+}
+.link-white:hover {
+  text-decoration: underline;
+}
+.search-input:focus {
+  border-color: #0064e0 !important;
+  outline: none;
+}
+.name-drill:hover {
+  text-decoration: underline;
+}
+.menu-item:hover {
+  background: #f0f2f5;
+}
+
+/* Row hover: tint the row and its sticky name cell together, unless selected. */
+.trow {
+  background: #ffffff;
+}
+.name-cell {
+  background: inherit;
+}
+.trow:hover,
+.trow:hover > .name-cell {
+  background: #f7f8fa;
+}
+.trow.sel,
+.trow.sel > .name-cell {
+  background: #ebf3fe;
+}
