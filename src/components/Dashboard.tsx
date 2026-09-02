@@ -4,7 +4,7 @@ import { buildTree, metric, sumMetrics, type PlatformTree } from "../lib/aggrega
 import { toCsv, downloadCsv } from "../lib/csv";
 import { fetchAdRows, fetchSyncStatus, type SyncStatus } from "../lib/data";
 import { DEFAULT_RANGE, previousRange, relativeTime } from "../lib/dates";
-import { fmtCell } from "../lib/display";
+import { fmtCell, roasColor } from "../lib/display";
 import { dec, EMPTY, MINUS, money, num, pct } from "../lib/format";
 import { fetchTiktokValue, saveTiktokValue, TIKTOK_VALUE_DEFAULT } from "../lib/settings";
 import { supabase } from "../lib/supabase";
@@ -155,7 +155,8 @@ export default function Dashboard() {
     if (isGoogle && level > 0) {
       return {
         baseItems: tree.campaigns,
-        notice: "Google reports at campaign level, so its campaigns are shown rolled up here.",
+        notice:
+          "Google data is synced at campaign level only, so ad group and ad views repeat the campaign rows shown here.",
       };
     }
     let items: Entity[];
@@ -170,13 +171,14 @@ export default function Dashboard() {
     let note: string | null = null;
     if (level > 0 && tree.campaignGrainOnly.size > 0 && platform === "tiktok") {
       if (parent && tree.campaignGrainOnly.has(parent.id)) {
-        note = "This Smart+ campaign reports at campaign level only, so there are no rows at this level.";
+        note =
+          "TikTok's API gives no per ad breakdown for Smart+ campaigns, so this campaign has no rows at this level.";
       } else if (!parent) {
         const n = tree.campaignGrainOnly.size;
         note =
           n === 1
-            ? "1 Smart+ campaign reports at campaign level and appears under Campaigns only."
-            : `${n} Smart+ campaigns report at campaign level and appear under Campaigns only.`;
+            ? "1 Smart+ campaign appears under Campaigns only: TikTok's API gives no per ad breakdown for Smart+."
+            : `${n} Smart+ campaigns appear under Campaigns only: TikTok's API gives no per ad breakdown for Smart+.`;
       }
     }
     return { baseItems: items, notice: note };
@@ -235,6 +237,8 @@ export default function Dashboard() {
         deltaColor = up ? "#1E7B4D" : "#C0392B";
       }
       const isEst = d.k === "roas" && cur.valueIsEstimated;
+      // ROAS verdict color on the KPI card too (roasColor in display.ts).
+      const valueColor = d.k === "roas" ? (roasColor(cur, isEst) ?? undefined) : undefined;
       const hint = isGoogle
         ? d.k === "conv" || d.k === "roas"
           ? "pooled conversions, not purchases"
@@ -250,6 +254,7 @@ export default function Dashboard() {
         hint,
         suffix: isEst ? "est" : undefined,
         title: isEst ? `Estimated at $${tiktokValue} per result, set in Display settings` : undefined,
+        valueColor,
       };
     });
   }, [tree, prevTree, currency, isGoogle, tiktokValue]);

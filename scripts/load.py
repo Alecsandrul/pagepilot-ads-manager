@@ -36,9 +36,10 @@ DATA_DIR = pathlib.Path(__file__).resolve().parent.parent / "data"
 
 COLS = ["platform", "date", "campaign_id", "campaign_name", "adset_id",
         "adset_name", "ad_id", "ad_name", "spend", "impressions", "clicks",
-        "video_views", "video_plays", "purchases", "purchase_value", "raw"]
+        "video_views", "video_plays", "thruplays", "purchases",
+        "purchase_value", "raw"]
 METRIC_COLS = ["campaign_name", "adset_name", "ad_name", "spend", "impressions",
-               "clicks", "video_views", "video_plays", "purchases",
+               "clicks", "video_views", "video_plays", "thruplays", "purchases",
                "purchase_value", "raw"]
 CONFLICT = "(platform, date, campaign_id, COALESCE(adset_id,''), COALESCE(ad_id,''))"
 
@@ -76,7 +77,20 @@ def record_run(password, platform, started, status, rows, error):
     """)
 
 
-def load_platform(password, platform, day):
+def has_thruplays(password):
+    """Migration 0005 adds ad_daily.thruplays, but migrations are applied by
+    the main session, not this repo - and the daily cron can run this code
+    before the migration lands. Probe once per run and load without the
+    column until it exists (old NDJSON has no `thruplays` key either, which
+    r.get() below already tolerates)."""
+    out = psql(password,
+               "SELECT count(*) FROM information_schema.columns "
+               "WHERE table_schema='public' AND table_name='ad_daily' "
+               "AND column_name='thruplays';")
+    return out.strip() == "1"
+
+
+def load_platform(password, platform, day, cols, metric_cols):
     path = DATA_DIR / f"{platform}_{day}.ndjson"
     rows = [json.loads(l) for l in path.read_text().splitlines() if l.strip()]
     if not rows:
@@ -85,18 +99,18 @@ def load_platform(password, platform, day):
     w = csv.writer(buf)
     for r in rows:
         w.writerow(["" if r.get(c) is None else
-                    (json.dumps(r[c]) if c == "raw" else r[c]) for c in COLS])
+                    (json.dumps(r[c]) if c == "raw" else r[c]) for c in cols])
     with tempfile.NamedTemporaryFile("w", suffix=".csv", delete=False) as f:
         f.write(buf.getvalue())
         csv_path = f.name
     try:
-        updates = ", ".join(f"{c} = excluded.{c}" for c in METRIC_COLS)
+        updates = ", ".join(f"{c} = excluded.{c}" for c in metric_cols)
         psql(password, f"""
             BEGIN;
             CREATE TEMP TABLE stage (LIKE public.ad_daily INCLUDING DEFAULTS) ON COMMIT DROP;
-            \\copy stage ({", ".join(COLS)}) FROM '{csv_path}' WITH (FORMAT csv)
-            INSERT INTO public.ad_daily AS t ({", ".join(COLS)})
-            SELECT {", ".join(COLS)} FROM stage
+            \\copy stage ({", ".join(cols)}) FROM '{csv_path}' WITH (FORMAT csv)
+            INSERT INTO public.ad_daily AS t ({", ".join(cols)})
+            SELECT {", ".join(cols)} FROM stage
             ON CONFLICT {CONFLICT}
             DO UPDATE SET {updates}, synced_at = now();
             COMMIT;
@@ -113,6 +127,18 @@ def main():
     args = ap.parse_args()
     password = db_pass()
     failed = False
+
+    cols, metric_cols = list(COLS), list(METRIC_COLS)
+    try:
+        if not has_thruplays(password):
+            print("ad_daily.thruplays missing (migration 0005 not applied yet)"
+                  " - loading without it", file=sys.stderr)
+            cols.remove("thruplays")
+            metric_cols.remove("thruplays")
+    except Exception as e:
+        print(f"thruplays probe failed ({e}) - loading without it", file=sys.stderr)
+        cols.remove("thruplays")
+        metric_cols.remove("thruplays")
 
     for platform in args.platforms.split(","):
         platform = platform.strip()
@@ -131,7 +157,7 @@ def main():
             failed = True
             continue
         try:
-            n = load_platform(password, platform, args.date)
+            n = load_platform(password, platform, args.date, cols, metric_cols)
             record_run(password, platform, started, "success", n, None)
             print(f"{platform} {args.date}: upserted {n} rows")
         except Exception as e:

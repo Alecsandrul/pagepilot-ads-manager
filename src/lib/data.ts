@@ -1,9 +1,12 @@
 import { supabase } from "./supabase";
 import type { AdRow, Platform, SyncRun } from "./types";
 
+// NOTE: `thruplays` requires migration 0005 on the live DB - PostgREST
+// rejects the whole select if the column is missing. Deploy this frontend
+// only AFTER 0005 is applied.
 const AD_COLUMNS =
   "platform,date,campaign_id,campaign_name,adset_id,adset_name,ad_id,ad_name," +
-  "spend,impressions,clicks,video_views,video_plays,purchases,purchase_value,purchases_are_pooled";
+  "spend,impressions,clicks,video_views,video_plays,thruplays,purchases,purchase_value,purchases_are_pooled";
 
 const PAGE = 1000;
 

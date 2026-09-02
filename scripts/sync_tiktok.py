@@ -15,6 +15,8 @@ HARD CONSTRAINTS (memory: reference_tiktok_ad_copy_2026_08_11):
     2026 while $52k was spent. complete_payment only registers from Apr 2026.
   * video_plays = video_play_actions (NOT the 3s play, memory
     reference_martynas_results_format); video_views = video_watched_2s.
+  * thruplays = video_watched_6s - TikTok has no ThruPlay; the 6s watched
+    count is the closest analog (hold rate = 6s / 2s). Added 2026-09-02.
   * purchase_value stays NULL - no trustworthy value metric on this account.
 
 Usage:  sync_tiktok.py [--date YYYY-MM-DD] [--days N]
@@ -88,7 +90,7 @@ def fetch_campaign_flags(token):
 def fetch_report(token, level, dims, id_metrics, day):
     metrics = id_metrics + ["spend", "impressions", "clicks",
                             "video_play_actions", "video_watched_2s",
-                            "complete_payment"]
+                            "video_watched_6s", "complete_payment"]
     rows, page = [], 1
     while True:
         data = get(token, "/report/integrated/get/", {
@@ -123,6 +125,7 @@ def to_row(day, dims, m, grain):
         "clicks": int(m.get("clicks", 0)),
         "video_views": int(m.get("video_watched_2s", 0)),
         "video_plays": int(m.get("video_play_actions", 0)),
+        "thruplays": int(m.get("video_watched_6s", 0)),
         "purchases": float(m.get("complete_payment", 0)),
         "purchase_value": None,  # no trustworthy value metric here
         "raw": {"dimensions": dims, "metrics": m},

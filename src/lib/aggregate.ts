@@ -11,6 +11,7 @@ export function emptyMetrics(): Metrics {
     valueIsEstimated: false,
     videoViews: null,
     videoPlays: null,
+    thruplays: null,
     pooled: false,
     latestActivity: null,
   };
@@ -26,6 +27,7 @@ function addRow(m: Metrics, r: AdRow): void {
   }
   if (r.video_views != null) m.videoViews = (m.videoViews ?? 0) + r.video_views;
   if (r.video_plays != null) m.videoPlays = (m.videoPlays ?? 0) + r.video_plays;
+  if (r.thruplays != null) m.thruplays = (m.thruplays ?? 0) + r.thruplays;
   if (r.purchases_are_pooled) m.pooled = true;
   if ((r.spend || 0) > 0 || (r.impressions || 0) > 0) {
     if (!m.latestActivity || r.date > m.latestActivity) m.latestActivity = r.date;
@@ -57,6 +59,7 @@ export function sumMetrics(list: Metrics[]): Metrics {
     }
     if (m.videoViews != null) out.videoViews = (out.videoViews ?? 0) + m.videoViews;
     if (m.videoPlays != null) out.videoPlays = (out.videoPlays ?? 0) + m.videoPlays;
+    if (m.thruplays != null) out.thruplays = (out.thruplays ?? 0) + m.thruplays;
     if (m.pooled) out.pooled = true;
     if (m.latestActivity && (!out.latestActivity || m.latestActivity > out.latestActivity)) {
       out.latestActivity = m.latestActivity;
@@ -170,7 +173,19 @@ export function buildTree(platform: Platform, rows: AdRow[], opts?: BuildOpts): 
     const nAds = ads.filter((x) => x.campaignId === e.id).length;
     if (nGroups === 0 && nAds === 0) {
       campaignGrainOnly.add(e.id);
-      e.sub = "Reports at campaign level";
+      // Data grain honesty (Alex, 2026-09-02): say WHY there is no drill
+      // down, so a campaign grain row never reads as broken data.
+      if (platform === "tiktok") {
+        e.sub = "Smart+ · campaign totals only";
+        e.grainTip =
+          "TikTok's API gives no per ad breakdown for Smart+ campaigns, so this row is the whole campaign.";
+      } else if (platform === "google") {
+        e.sub = "Campaign level data";
+        e.grainTip =
+          "Google is synced at campaign level only, so ad group and ad views would repeat this row.";
+      } else {
+        e.sub = "Reports at campaign level";
+      }
     } else {
       e.sub = `${nGroups} ${(nGroups === 1 ? terms[1].slice(0, -1) : terms[1]).toLowerCase()} · ${nAds} ${(nAds === 1 ? terms[2].slice(0, -1) : terms[2]).toLowerCase()}`;
     }
@@ -214,6 +229,9 @@ export function metric(m: Metrics, k: MetricKey): number {
       return m.impressions ? m.clicks / m.impressions : 0;
     case "hookrate":
       return m.videoViews && m.videoPlays ? m.videoViews / m.videoPlays : 0;
+    case "holdrate":
+      // Ratio of sums (impression weighted), same as hook rate.
+      return m.thruplays && m.videoViews ? m.thruplays / m.videoViews : 0;
     case "cpc":
       return m.clicks ? m.spend / m.clicks : 0;
     case "cpm":

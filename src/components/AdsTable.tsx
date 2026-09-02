@@ -1,5 +1,4 @@
-import { metric } from "../lib/aggregate";
-import { fmtCell } from "../lib/display";
+import { fmtCell, roasColor } from "../lib/display";
 import { EMPTY } from "../lib/format";
 import type {
   ColumnDef,
@@ -140,11 +139,11 @@ export default function AdsTable(props: Props) {
     const isEst = (c.k === "revenue" || c.k === "roas") && e.m.valueIsEstimated && v !== EMPTY;
     let color = "#1C2B33";
     if (v === EMPTY) color = "#B0B3B8";
-    else if (isEst) color = "#65676B";
-    else if (c.k === "roas" && e.m.purchaseValue != null) {
-      const r = metric(e.m, "roas");
-      color = r >= 2 ? "#1E7B4D" : r < 1.2 ? "#C0392B" : "#1C2B33";
-    }
+    else if (c.k === "roas") {
+      // >= 1.00 green, < 1.00 red; estimates in a lighter shade but still
+      // colored (rule + supersession note on roasColor in display.ts).
+      color = roasColor(e.m, isEst) ?? (isEst ? "#65676B" : "#1C2B33");
+    } else if (isEst) color = "#65676B";
     return (
       <span
         title={
@@ -425,6 +424,14 @@ export default function AdsTable(props: Props) {
                   totals.valueIsEstimated &&
                   v !== "" &&
                   v !== EMPTY;
+                // ROAS verdict color applies to the totals row too (see
+                // roasColor in display.ts).
+                const color =
+                  c.k === "roas" && v !== "" && v !== EMPTY
+                    ? (roasColor(totals, isEst) ?? "#1C2B33")
+                    : isEst
+                      ? "#65676B"
+                      : "#1C2B33";
                 return (
                   <div
                     key={c.k}
@@ -440,7 +447,7 @@ export default function AdsTable(props: Props) {
                       fontSize: 13,
                       fontWeight: 600,
                       fontVariantNumeric: "tabular-nums",
-                      color: isEst ? "#65676B" : "#1C2B33",
+                      color,
                       whiteSpace: "nowrap",
                     }}
                   >
@@ -492,7 +499,10 @@ export default function AdsTable(props: Props) {
                         background: active ? "#31A24C" : "#C4C9CE",
                       }}
                     />
-                    <span style={{ minWidth: 0, display: "flex", flexDirection: "column", gap: 2 }}>
+                    <span
+                      title={e.grainTip}
+                      style={{ minWidth: 0, display: "flex", flexDirection: "column", gap: 2 }}
+                    >
                       <span
                         className={canDrill ? "name-drill" : undefined}
                         onClick={() => canDrill && onDrill(e)}

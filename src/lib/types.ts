@@ -23,6 +23,7 @@ export interface AdRow {
   clicks: number;
   video_views: number | null;
   video_plays: number | null;
+  thruplays: number | null;
   purchases: number;
   purchase_value: number | null;
   purchases_are_pooled: boolean;
@@ -43,6 +44,8 @@ export interface Metrics {
   videoViews: number | null;
   /** Video starts (video_play_actions on both platforms). Null when never synced. */
   videoPlays: number | null;
+  /** ThruPlays (meta: video_thruplay_watched_actions; tiktok: video_watched_6s, its closest analog). Null when never synced. */
+  thruplays: number | null;
   /** True when any row in this aggregate has purchases_are_pooled (google). */
   pooled: boolean;
   /** Most recent date with any spend or impressions, for the Delivery pill. */
@@ -58,6 +61,8 @@ export interface Entity {
   sub: string;
   campaignId: string;
   groupId: string | null;
+  /** Tooltip explaining a campaign grain row (google, TikTok Smart+). */
+  grainTip?: string;
   m: Metrics;
 }
 
@@ -69,6 +74,7 @@ export type MetricKey =
   | "clicks"
   | "ctr"
   | "hookrate"
+  | "holdrate"
   | "cpc"
   | "cpm"
   | "conv"
@@ -99,6 +105,13 @@ export const COLUMNS: ColumnDef[] = [
     w: 110,
     a: "flex-end",
     tip: "Hook rate = 3 second video plays divided by video starts. TikTok has no 3 second metric, so its 2 second watched count is used there.",
+  },
+  {
+    k: "holdrate",
+    l: "Hold rate",
+    w: 110,
+    a: "flex-end",
+    tip: "Hold rate = ThruPlays divided by 3 second video plays (Meta's custom metric). TikTok has no ThruPlay, so 6 second watched over 2 second watched is the closest analog there. Google syncs no video metrics.",
   },
   { k: "cpc", l: "CPC", w: 100, a: "flex-end" },
   { k: "cpm", l: "CPM", w: 100, a: "flex-end" },
