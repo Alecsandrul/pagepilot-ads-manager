@@ -49,6 +49,8 @@ interface Props {
   notice: string | null;
   /** True on the google tab: Results values are pooled conversions. */
   pooledPlatform: boolean;
+  /** Tooltip for estimated Conversion value / ROAS cells (tiktok assumed value). */
+  estTooltip: string;
   footerRight: string;
 }
 
@@ -104,6 +106,7 @@ export default function AdsTable(props: Props) {
     density,
     notice,
     pooledPlatform,
+    estTooltip,
     footerRight,
   } = props;
 
@@ -134,8 +137,10 @@ export default function AdsTable(props: Props) {
       );
     }
     const v = fmtCell(e.m, c.k, currency);
+    const isEst = (c.k === "revenue" || c.k === "roas") && e.m.valueIsEstimated && v !== EMPTY;
     let color = "#1C2B33";
     if (v === EMPTY) color = "#B0B3B8";
+    else if (isEst) color = "#65676B";
     else if (c.k === "roas" && e.m.purchaseValue != null) {
       const r = metric(e.m, "roas");
       color = r >= 2 ? "#1E7B4D" : r < 1.2 ? "#C0392B" : "#1C2B33";
@@ -143,9 +148,11 @@ export default function AdsTable(props: Props) {
     return (
       <span
         title={
-          pooledPlatform && (c.k === "conv" || c.k === "cpa") && v !== EMPTY
-            ? "Pooled conversions, not purchases"
-            : undefined
+          isEst
+            ? estTooltip
+            : pooledPlatform && (c.k === "conv" || c.k === "cpa") && v !== EMPTY
+              ? "Pooled conversions, not purchases"
+              : undefined
         }
         style={{
           fontSize: 13,
@@ -155,6 +162,7 @@ export default function AdsTable(props: Props) {
         }}
       >
         {v}
+        {isEst && <span style={{ fontSize: 10.5, color: "#8A8D91", marginLeft: 5 }}>est</span>}
         {pooledPlatform && c.k === "conv" && v !== EMPTY && (
           <span style={{ fontSize: 10.5, color: "#8A8D91", marginLeft: 5 }}>pooled</span>
         )}
@@ -409,27 +417,41 @@ export default function AdsTable(props: Props) {
               >
                 {`Total · ${items.length} ${terms[level].toLowerCase()}`}
               </div>
-              {columns.map((c) => (
-                <div
-                  key={c.k}
-                  style={{
-                    flex: `0 0 ${c.w}px`,
-                    width: c.w,
-                    height: 44,
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: c.a,
-                    padding: "0 14px",
-                    fontSize: 13,
-                    fontWeight: 600,
-                    fontVariantNumeric: "tabular-nums",
-                    color: "#1C2B33",
-                    whiteSpace: "nowrap",
-                  }}
-                >
-                  {c.k === "status" || c.k === "budget" ? "" : fmtCell(totals, c.k, currency)}
-                </div>
-              ))}
+              {columns.map((c) => {
+                const v = c.k === "status" || c.k === "budget" ? "" : fmtCell(totals, c.k, currency);
+                const isEst =
+                  (c.k === "revenue" || c.k === "roas") &&
+                  totals.valueIsEstimated &&
+                  v !== "" &&
+                  v !== EMPTY;
+                return (
+                  <div
+                    key={c.k}
+                    title={isEst ? estTooltip : undefined}
+                    style={{
+                      flex: `0 0 ${c.w}px`,
+                      width: c.w,
+                      height: 44,
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: c.a,
+                      padding: "0 14px",
+                      fontSize: 13,
+                      fontWeight: 600,
+                      fontVariantNumeric: "tabular-nums",
+                      color: isEst ? "#65676B" : "#1C2B33",
+                      whiteSpace: "nowrap",
+                    }}
+                  >
+                    {v}
+                    {isEst && (
+                      <span style={{ fontSize: 10.5, color: "#8A8D91", marginLeft: 5, fontWeight: 400 }}>
+                        est
+                      </span>
+                    )}
+                  </div>
+                );
+              })}
             </div>
 
             {/* Rows */}

@@ -37,6 +37,8 @@ export interface Metrics {
   purchases: number;
   /** Sum of purchase_value; null when no row in the aggregate carried a value. */
   purchaseValue: number | null;
+  /** True when purchaseValue is an ESTIMATE (tiktok assumed $ per result), not platform reported. */
+  valueIsEstimated: boolean;
   /** True when any row in this aggregate has purchases_are_pooled (google). */
   pooled: boolean;
   /** Most recent date with any spend or impressions, for the Delivery pill. */

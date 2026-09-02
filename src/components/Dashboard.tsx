@@ -6,6 +6,7 @@ import { fetchAdRows, fetchSyncStatus, type SyncStatus } from "../lib/data";
 import { DEFAULT_RANGE, previousRange, relativeTime } from "../lib/dates";
 import { fmtCell } from "../lib/display";
 import { dec, EMPTY, MINUS, money, num, pct } from "../lib/format";
+import { fetchTiktokValue, saveTiktokValue, TIKTOK_VALUE_DEFAULT } from "../lib/settings";
 import { supabase } from "../lib/supabase";
 import {
   COLUMNS,
@@ -84,6 +85,11 @@ export default function Dashboard() {
   const [colsOpen, setColsOpen] = useState(false);
   const [displayOpen, setDisplayOpen] = useState(false);
 
+  // TikTok assumed $ per result (app_settings, migration 0004)
+  const [tiktokValue, setTiktokValue] = useState<number>(TIKTOK_VALUE_DEFAULT);
+  const [tiktokDraft, setTiktokDraft] = useState<string>(String(TIKTOK_VALUE_DEFAULT));
+  const [tiktokSaveError, setTiktokSaveError] = useState<string | null>(null);
+
   const prev = useMemo(() => previousRange(range), [range]);
 
   const load = useCallback(() => {
@@ -100,19 +106,28 @@ export default function Dashboard() {
     fetchSyncStatus()
       .then(setSync)
       .catch(() => setSync(null));
+    fetchTiktokValue()
+      .then((v) => {
+        setTiktokValue(v);
+        setTiktokDraft(String(v));
+      })
+      .catch(() => {
+        // Table missing or unreachable: the default stands.
+      });
   }, []);
 
   // Trees for the current and previous period, per platform
   const trees = useMemo(() => {
     const cur: Partial<Record<Platform, PlatformTree>> = {};
     const before: Partial<Record<Platform, PlatformTree>> = {};
+    const opts = { tiktokValuePerResult: tiktokValue };
     for (const p of PLATFORMS) {
       const platformRows = (rows ?? []).filter((r) => r.platform === p);
-      cur[p] = buildTree(p, platformRows.filter((r) => r.date >= range.from));
-      before[p] = buildTree(p, platformRows.filter((r) => r.date < range.from));
+      cur[p] = buildTree(p, platformRows.filter((r) => r.date >= range.from), opts);
+      before[p] = buildTree(p, platformRows.filter((r) => r.date < range.from), opts);
     }
     return { cur: cur as Record<Platform, PlatformTree>, before: before as Record<Platform, PlatformTree> };
-  }, [rows, range.from]);
+  }, [rows, range.from, tiktokValue]);
 
   const tree = trees.cur[platform];
   const prevTree = trees.before[platform];
@@ -219,13 +234,25 @@ export default function Dashboard() {
         delta = `${up ? "+" : MINUS}${dec(Math.abs(change), 1)}% vs. prev.`;
         deltaColor = up ? "#1E7B4D" : "#C0392B";
       }
-      const hint =
-        isGoogle && (d.k === "conv" || d.k === "roas")
+      const isEst = d.k === "roas" && cur.valueIsEstimated;
+      const hint = isGoogle
+        ? d.k === "conv" || d.k === "roas"
           ? "pooled conversions, not purchases"
+          : undefined
+        : isEst
+          ? `estimated at $${tiktokValue} per result`
           : undefined;
-      return { label: d.label, value: d.fmt(v), delta, deltaColor, hint };
+      return {
+        label: d.label,
+        value: d.fmt(v),
+        delta,
+        deltaColor,
+        hint,
+        suffix: isEst ? "est" : undefined,
+        title: isEst ? `Estimated at $${tiktokValue} per result, set in Display settings` : undefined,
+      };
     });
-  }, [tree, prevTree, currency, isGoogle]);
+  }, [tree, prevTree, currency, isGoogle, tiktokValue]);
 
   const tabs: PlatformTab[] = PLATFORMS.map((p) => ({
     key: p,
@@ -243,6 +270,17 @@ export default function Dashboard() {
     if (run.status === "error") return `Last ${meta.label} sync FAILED ${rel}`;
     return `Last ${meta.label} sync ${rel} · platform reported metrics`;
   }, [sync, platform, meta.label]);
+
+  const estTooltip = `Estimated at $${tiktokValue} per result, set in Display settings`;
+  const tiktokDraftValid = Number.isFinite(Number(tiktokDraft)) && Number(tiktokDraft) > 0;
+
+  function saveTiktok() {
+    const v = Number(tiktokDraft);
+    if (!Number.isFinite(v) || v <= 0) return;
+    setTiktokValue(v); // optimistic: recompute immediately
+    setTiktokSaveError(null);
+    saveTiktokValue(v).catch((e: Error) => setTiktokSaveError(`Saved locally only: ${e.message}`));
+  }
 
   function selectPlatform(p: Platform) {
     setPlatform(p);
@@ -293,12 +331,17 @@ export default function Dashboard() {
   function exportCsv() {
     const header = [meta.terms[level], "Detail", ...visibleCols.filter((c) => c.k !== "status" && c.k !== "budget").map((c) => c.l)];
     const dataCols = visibleCols.filter((c) => c.k !== "status" && c.k !== "budget");
+    const csvCell = (m: (typeof totals), k: MetricKey) => {
+      const v = fmtCell(m, k, currency);
+      const isEst = (k === "revenue" || k === "roas") && m.valueIsEstimated && v !== EMPTY;
+      return isEst ? `${v} est` : v;
+    };
     const body = items.map((e) => [
       e.name,
       e.sub,
-      ...dataCols.map((c) => fmtCell(e.m, c.k, currency)),
+      ...dataCols.map((c) => csvCell(e.m, c.k)),
     ]);
-    const totalRow = ["Total", "", ...dataCols.map((c) => fmtCell(totals, c.k, currency))];
+    const totalRow = ["Total", "", ...dataCols.map((c) => csvCell(totals, c.k))];
     const csv = toCsv([header, ...body, totalRow]);
     const term = meta.terms[level].toLowerCase().replace(/ /g, "_");
     downloadCsv(`ads_${platform}_${term}_${range.from}_${range.to}.csv`, csv);
@@ -391,6 +434,62 @@ export default function Dashboard() {
                 {c !== "USD" && <span style={{ fontSize: 11, color: "#8A8D91" }}>fixed rate</span>}
               </div>
             ))}
+            <div style={menuHeading}>TikTok value per result ($)</div>
+            <div style={{ padding: "2px 10px 8px", display: "flex", flexDirection: "column", gap: 6 }}>
+              <div style={{ display: "flex", gap: 8 }}>
+                <input
+                  className="search-input"
+                  type="number"
+                  min={1}
+                  step="any"
+                  value={tiktokDraft}
+                  onChange={(e) => setTiktokDraft(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" && tiktokDraftValid) saveTiktok();
+                  }}
+                  style={{
+                    height: 30,
+                    width: 90,
+                    padding: "0 8px",
+                    border: "1px solid #CFD2D7",
+                    borderRadius: 7,
+                    fontSize: 12.5,
+                    color: "#1C2B33",
+                  }}
+                />
+                <button
+                  className="btn-primary"
+                  onClick={saveTiktok}
+                  disabled={!tiktokDraftValid}
+                  style={{
+                    height: 30,
+                    padding: "0 12px",
+                    border: "none",
+                    borderRadius: 7,
+                    background: "#0064E0",
+                    color: "#fff",
+                    fontSize: 12.5,
+                    fontWeight: 600,
+                    cursor: "pointer",
+                    opacity: tiktokDraftValid ? 1 : 0.5,
+                  }}
+                >
+                  Save
+                </button>
+              </div>
+              <div
+                style={{
+                  fontSize: 11,
+                  color: tiktokSaveError ? "#C0392B" : "#8A8D91",
+                  lineHeight: 1.4,
+                }}
+              >
+                {tiktokSaveError ??
+                  (tiktokDraftValid
+                    ? "Drives estimated Conversion value and ROAS for TikTok rows."
+                    : "Enter a positive number.")}
+              </div>
+            </div>
           </Dropdown>
 
           <Dropdown
@@ -487,6 +586,7 @@ export default function Dashboard() {
           density={density}
           notice={notice}
           pooledPlatform={isGoogle}
+          estTooltip={estTooltip}
           footerRight={footerRight}
         />
       )}

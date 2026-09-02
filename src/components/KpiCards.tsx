@@ -4,6 +4,10 @@ export interface Kpi {
   delta: string;
   deltaColor: string;
   hint?: string;
+  /** Small marker after the value, e.g. "est" for estimated figures. */
+  suffix?: string;
+  /** Tooltip on the value, e.g. how an estimate is derived. */
+  title?: string;
 }
 
 export default function KpiCards({ kpis }: { kpis: Kpi[] }) {
@@ -40,6 +44,7 @@ export default function KpiCards({ kpis }: { kpis: Kpi[] }) {
             {k.label}
           </div>
           <div
+            title={k.title}
             style={{
               fontSize: 22,
               fontWeight: 600,
@@ -49,6 +54,11 @@ export default function KpiCards({ kpis }: { kpis: Kpi[] }) {
             }}
           >
             {k.value}
+            {k.suffix && (
+              <span style={{ fontSize: 12, fontWeight: 600, color: "#8A8D91", marginLeft: 6 }}>
+                {k.suffix}
+              </span>
+            )}
           </div>
           <div
             style={{

@@ -8,6 +8,7 @@ export function emptyMetrics(): Metrics {
     clicks: 0,
     purchases: 0,
     purchaseValue: null,
+    valueIsEstimated: false,
     pooled: false,
     latestActivity: null,
   };
@@ -46,6 +47,9 @@ export function sumMetrics(list: Metrics[]): Metrics {
     if (!(mixed && m.pooled)) {
       out.purchases += m.purchases;
       if (m.purchaseValue != null) out.purchaseValue = (out.purchaseValue ?? 0) + m.purchaseValue;
+      // An aggregate that includes any estimated value (tiktok assumed $
+      // per result) is itself an estimate and must be marked as such.
+      if (m.valueIsEstimated) out.valueIsEstimated = true;
     }
     if (m.pooled) out.pooled = true;
     if (m.latestActivity && (!out.latestActivity || m.latestActivity > out.latestActivity)) {
@@ -103,8 +107,18 @@ export interface PlatformTree {
   m: Metrics;
 }
 
+export interface BuildOpts {
+  /**
+   * Assumed $ per result for tiktok (app_settings, migration 0004). When set,
+   * tiktok entities at every grain get an ESTIMATED
+   * purchaseValue = purchases x value and are flagged valueIsEstimated
+   * (tiktok never syncs a trustworthy purchase_value).
+   */
+  tiktokValuePerResult?: number;
+}
+
 /** Build campaign, group and ad entities for one platform from ad_daily rows. */
-export function buildTree(platform: Platform, rows: AdRow[]): PlatformTree {
+export function buildTree(platform: Platform, rows: AdRow[], opts?: BuildOpts): PlatformTree {
   const terms = PLATFORM_META[platform].terms;
 
   const campaignGroups = groupBy(
@@ -156,6 +170,16 @@ export function buildTree(platform: Platform, rows: AdRow[]): PlatformTree {
     }
     return e;
   });
+
+  const assumed = opts?.tiktokValuePerResult;
+  if (platform === "tiktok" && assumed != null && assumed > 0) {
+    for (const list of [campaigns, groups, ads]) {
+      for (const e of list) {
+        e.m.purchaseValue = e.m.purchases * assumed;
+        e.m.valueIsEstimated = true;
+      }
+    }
+  }
 
   return {
     platform,
