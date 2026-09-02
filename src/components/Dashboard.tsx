@@ -257,7 +257,6 @@ export default function Dashboard() {
   const tabs: PlatformTab[] = PLATFORMS.map((p) => ({
     key: p,
     label: PLATFORM_META[p].label,
-    dot: PLATFORM_META[p].dot,
     spend: money(trees.cur[p].m.spend, 0, currency),
     active: p === platform,
   }));
