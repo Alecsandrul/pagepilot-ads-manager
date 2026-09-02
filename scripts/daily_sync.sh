@@ -30,6 +30,19 @@ for platform in meta tiktok google; do
   sleep 73
 done
 
+# Budget snapshot (entity_budgets, migration 0006): current budgets at the
+# level they live. Not day-critical, but a failure is still a failure.
+err="$DIR/../data/budgets_${DATE}.err"
+if python3 "$DIR/sync_budgets.py" --date "$DATE" 2> "$err"; then
+  rm -f "$err"
+  echo "sync_budgets: ok"
+else
+  echo "sync_budgets: FAILED (stderr kept at $err)"
+  cat "$err"
+  FAILED=1
+fi
+sleep 31
+
 python3 "$DIR/load.py" --date "$DATE" --platforms meta,tiktok,google || FAILED=1
 
 echo "=== daily_sync $DATE done $(date -Is) exit $FAILED ==="

@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type * as React from "react";
-import { buildTree, metric, sumMetrics, type PlatformTree } from "../lib/aggregate";
+import { applyBudgets, buildTree, metric, sumMetrics, type PlatformTree } from "../lib/aggregate";
 import { toCsv, downloadCsv } from "../lib/csv";
-import { fetchAdRows, fetchSyncStatus, type SyncStatus } from "../lib/data";
+import { fetchAdRows, fetchBudgets, fetchSyncStatus, type SyncStatus } from "../lib/data";
 import { DEFAULT_RANGE, previousRange, relativeTime } from "../lib/dates";
-import { fmtCell } from "../lib/display";
+import { fmtCell, roasColor } from "../lib/display";
 import { dec, EMPTY, MINUS, money, num, pct } from "../lib/format";
 import { fetchTiktokValue, saveTiktokValue, TIKTOK_VALUE_DEFAULT } from "../lib/settings";
 import { supabase } from "../lib/supabase";
@@ -13,6 +13,7 @@ import {
   PLATFORMS,
   PLATFORM_META,
   type AdRow,
+  type BudgetRow,
   type Currency,
   type DateRange,
   type Density,
@@ -71,6 +72,7 @@ export default function Dashboard() {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [sync, setSync] = useState<SyncStatus | null>(null);
+  const [budgets, setBudgets] = useState<BudgetRow[]>([]);
 
   // View state
   const [platform, setPlatform] = useState<Platform>("meta");
@@ -106,6 +108,12 @@ export default function Dashboard() {
     fetchSyncStatus()
       .then(setSync)
       .catch(() => setSync(null));
+    fetchBudgets()
+      .then(setBudgets)
+      .catch(() => {
+        // Table missing (pre migration 0006) or unreachable: no budgets,
+        // every Budget cell shows its placeholder.
+      });
     fetchTiktokValue()
       .then((v) => {
         setTiktokValue(v);
@@ -124,10 +132,11 @@ export default function Dashboard() {
     for (const p of PLATFORMS) {
       const platformRows = (rows ?? []).filter((r) => r.platform === p);
       cur[p] = buildTree(p, platformRows.filter((r) => r.date >= range.from), opts);
+      applyBudgets(cur[p]!, budgets);
       before[p] = buildTree(p, platformRows.filter((r) => r.date < range.from), opts);
     }
     return { cur: cur as Record<Platform, PlatformTree>, before: before as Record<Platform, PlatformTree> };
-  }, [rows, range.from, tiktokValue]);
+  }, [rows, range.from, tiktokValue, budgets]);
 
   const tree = trees.cur[platform];
   const prevTree = trees.before[platform];
@@ -152,10 +161,13 @@ export default function Dashboard() {
 
   // Items at the current level, before search and sort
   const { baseItems, notice } = useMemo((): { baseItems: Entity[]; notice: string | null } => {
-    if (isGoogle && level > 0) {
+    // Google syncs at ad grain since 2026-09-02; a range holding only the
+    // older campaign grain rows still rolls up to campaigns at every level.
+    if (isGoogle && level > 0 && tree.groups.length === 0 && tree.ads.length === 0) {
       return {
         baseItems: tree.campaigns,
-        notice: "Google reports at campaign level, so its campaigns are shown rolled up here.",
+        notice:
+          "Google data in this range is campaign level only (synced before the ad grain sync), so its campaigns are shown rolled up here.",
       };
     }
     let items: Entity[];
@@ -170,13 +182,14 @@ export default function Dashboard() {
     let note: string | null = null;
     if (level > 0 && tree.campaignGrainOnly.size > 0 && platform === "tiktok") {
       if (parent && tree.campaignGrainOnly.has(parent.id)) {
-        note = "This Smart+ campaign reports at campaign level only, so there are no rows at this level.";
+        note =
+          "TikTok's API gives no per ad breakdown for Smart+ campaigns, so this campaign has no rows at this level.";
       } else if (!parent) {
         const n = tree.campaignGrainOnly.size;
         note =
           n === 1
-            ? "1 Smart+ campaign reports at campaign level and appears under Campaigns only."
-            : `${n} Smart+ campaigns report at campaign level and appear under Campaigns only.`;
+            ? "1 Smart+ campaign appears under Campaigns only: TikTok's API gives no per ad breakdown for Smart+."
+            : `${n} Smart+ campaigns appear under Campaigns only: TikTok's API gives no per ad breakdown for Smart+.`;
       }
     }
     return { baseItems: items, notice: note };
@@ -188,7 +201,7 @@ export default function Dashboard() {
     if (needle) out = out.filter((e) => `${e.name} ${e.sub}`.toLowerCase().includes(needle));
     const dir = sort.dir === "asc" ? 1 : -1;
     const value = (e: Entity) =>
-      sort.key === "status" ? (isActive(e) ? 1 : 0) : sort.key === "budget" ? 0 : metric(e.m, sort.key);
+      sort.key === "status" ? (isActive(e) ? 1 : 0) : sort.key === "budget" ? (e.budget?.amount ?? 0) : metric(e.m, sort.key);
     return [...out].sort((a, b) => (value(a) - value(b)) * dir || b.m.spend - a.m.spend);
   }, [baseItems, q, sort, isActive]);
 
@@ -196,9 +209,10 @@ export default function Dashboard() {
 
   const visibleCols = useMemo(() => COLUMNS.filter((c) => !hiddenCols.has(c.k)), [hiddenCols]);
 
-  const counts: [number, number, number] = isGoogle
-    ? [tree.campaigns.length, tree.campaigns.length, tree.campaigns.length]
-    : [tree.campaigns.length, tree.groups.length, tree.ads.length];
+  const counts: [number, number, number] =
+    isGoogle && tree.groups.length === 0 && tree.ads.length === 0
+      ? [tree.campaigns.length, tree.campaigns.length, tree.campaigns.length]
+      : [tree.campaigns.length, tree.groups.length, tree.ads.length];
 
   // KPI cards with delta vs the previous equal length period
   const kpis = useMemo((): Kpi[] => {
@@ -235,9 +249,14 @@ export default function Dashboard() {
         deltaColor = up ? "#1E7B4D" : "#C0392B";
       }
       const isEst = d.k === "roas" && cur.valueIsEstimated;
-      const hint = isGoogle
+      // ROAS verdict color on the KPI card too (roasColor in display.ts).
+      const valueColor = d.k === "roas" ? (roasColor(cur, isEst) ?? undefined) : undefined;
+      // Pooled labeling is data driven since the google ad grain sync:
+      // rows synced before it hold pooled conversions (purchases_are_pooled)
+      // while re-synced rows hold browser_payment purchases only.
+      const hint = cur.pooled
         ? d.k === "conv" || d.k === "roas"
-          ? "pooled conversions, not purchases"
+          ? "includes pooled conversions, not purchases"
           : undefined
         : isEst
           ? `estimated at $${tiktokValue} per result`
@@ -250,6 +269,7 @@ export default function Dashboard() {
         hint,
         suffix: isEst ? "est" : undefined,
         title: isEst ? `Estimated at $${tiktokValue} per result, set in Display settings` : undefined,
+        valueColor,
       };
     });
   }, [tree, prevTree, currency, isGoogle, tiktokValue]);
@@ -584,7 +604,6 @@ export default function Dashboard() {
           currency={currency}
           density={density}
           notice={notice}
-          pooledPlatform={isGoogle}
           estTooltip={estTooltip}
           footerRight={footerRight}
         />

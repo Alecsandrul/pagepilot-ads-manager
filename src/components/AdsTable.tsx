@@ -1,6 +1,5 @@
-import { metric } from "../lib/aggregate";
-import { fmtCell } from "../lib/display";
-import { EMPTY } from "../lib/format";
+import { fmtCell, roasColor } from "../lib/display";
+import { EMPTY, money } from "../lib/format";
 import type {
   ColumnDef,
   Currency,
@@ -47,8 +46,6 @@ interface Props {
   currency: Currency;
   density: Density;
   notice: string | null;
-  /** True on the google tab: Results values are pooled conversions. */
-  pooledPlatform: boolean;
   /** Tooltip for estimated Conversion value / ROAS cells (tiktok assumed value). */
   estTooltip: string;
   footerRight: string;
@@ -105,7 +102,6 @@ export default function AdsTable(props: Props) {
     currency,
     density,
     notice,
-    pooledPlatform,
     estTooltip,
     footerRight,
   } = props;
@@ -136,21 +132,41 @@ export default function AdsTable(props: Props) {
         </span>
       );
     }
+    if (c.k === "budget") {
+      // Budget renders where the entity OWNS one (entity_budgets); a row
+      // that owns none explains itself ("CBO" under a campaign budget,
+      // "Ad set budgets" on an ABO campaign) or shows the placeholder.
+      if (e.budget) {
+        return (
+          <span style={{ fontSize: 13, fontVariantNumeric: "tabular-nums", color: "#1C2B33", whiteSpace: "nowrap" }}>
+            {money(e.budget.amount, 0, currency)}
+            <span style={{ fontSize: 10.5, color: "#8A8D91", marginLeft: 5 }}>
+              {e.budget.type === "daily" ? "daily" : "lifetime"}
+            </span>
+          </span>
+        );
+      }
+      return (
+        <span style={{ fontSize: e.budgetNote ? 12 : 13, color: e.budgetNote ? "#8A8D91" : "#B0B3B8", whiteSpace: "nowrap" }}>
+          {e.budgetNote ?? EMPTY}
+        </span>
+      );
+    }
     const v = fmtCell(e.m, c.k, currency);
     const isEst = (c.k === "revenue" || c.k === "roas") && e.m.valueIsEstimated && v !== EMPTY;
     let color = "#1C2B33";
     if (v === EMPTY) color = "#B0B3B8";
-    else if (isEst) color = "#65676B";
-    else if (c.k === "roas" && e.m.purchaseValue != null) {
-      const r = metric(e.m, "roas");
-      color = r >= 2 ? "#1E7B4D" : r < 1.2 ? "#C0392B" : "#1C2B33";
-    }
+    else if (c.k === "roas") {
+      // >= 1.00 green, < 1.00 red; estimates in a lighter shade but still
+      // colored (rule + supersession note on roasColor in display.ts).
+      color = roasColor(e.m, isEst) ?? (isEst ? "#65676B" : "#1C2B33");
+    } else if (isEst) color = "#65676B";
     return (
       <span
         title={
           isEst
             ? estTooltip
-            : pooledPlatform && (c.k === "conv" || c.k === "cpa") && v !== EMPTY
+            : e.m.pooled && (c.k === "conv" || c.k === "cpa") && v !== EMPTY
               ? "Pooled conversions, not purchases"
               : undefined
         }
@@ -163,7 +179,7 @@ export default function AdsTable(props: Props) {
       >
         {v}
         {isEst && <span style={{ fontSize: 10.5, color: "#8A8D91", marginLeft: 5 }}>est</span>}
-        {pooledPlatform && c.k === "conv" && v !== EMPTY && (
+        {e.m.pooled && c.k === "conv" && v !== EMPTY && (
           <span style={{ fontSize: 10.5, color: "#8A8D91", marginLeft: 5 }}>pooled</span>
         )}
       </span>
@@ -425,6 +441,14 @@ export default function AdsTable(props: Props) {
                   totals.valueIsEstimated &&
                   v !== "" &&
                   v !== EMPTY;
+                // ROAS verdict color applies to the totals row too (see
+                // roasColor in display.ts).
+                const color =
+                  c.k === "roas" && v !== "" && v !== EMPTY
+                    ? (roasColor(totals, isEst) ?? "#1C2B33")
+                    : isEst
+                      ? "#65676B"
+                      : "#1C2B33";
                 return (
                   <div
                     key={c.k}
@@ -440,7 +464,7 @@ export default function AdsTable(props: Props) {
                       fontSize: 13,
                       fontWeight: 600,
                       fontVariantNumeric: "tabular-nums",
-                      color: isEst ? "#65676B" : "#1C2B33",
+                      color,
                       whiteSpace: "nowrap",
                     }}
                   >
@@ -492,7 +516,10 @@ export default function AdsTable(props: Props) {
                         background: active ? "#31A24C" : "#C4C9CE",
                       }}
                     />
-                    <span style={{ minWidth: 0, display: "flex", flexDirection: "column", gap: 2 }}>
+                    <span
+                      title={e.grainTip}
+                      style={{ minWidth: 0, display: "flex", flexDirection: "column", gap: 2 }}
+                    >
                       <span
                         className={canDrill ? "name-drill" : undefined}
                         onClick={() => canDrill && onDrill(e)}

@@ -1,9 +1,12 @@
 import { supabase } from "./supabase";
-import type { AdRow, Platform, SyncRun } from "./types";
+import type { AdRow, BudgetRow, Platform, SyncRun } from "./types";
 
+// NOTE: `thruplays` requires migration 0005 on the live DB - PostgREST
+// rejects the whole select if the column is missing. Deploy this frontend
+// only AFTER 0005 is applied.
 const AD_COLUMNS =
   "platform,date,campaign_id,campaign_name,adset_id,adset_name,ad_id,ad_name," +
-  "spend,impressions,clicks,video_views,video_plays,purchases,purchase_value,purchases_are_pooled";
+  "spend,impressions,clicks,video_views,video_plays,thruplays,purchases,purchase_value,purchases_are_pooled";
 
 const PAGE = 1000;
 
@@ -30,6 +33,19 @@ export async function fetchAdRows(from: string, to: string): Promise<AdRow[]> {
     if (rows.length < PAGE) break;
   }
   return all;
+}
+
+/**
+ * Current budgets (entity_budgets, migration 0006). The table arriving with
+ * a later migration is a normal state: callers treat an error as "no
+ * budgets" and every Budget cell shows its placeholder.
+ */
+export async function fetchBudgets(): Promise<BudgetRow[]> {
+  const { data, error } = await supabase
+    .from("entity_budgets")
+    .select("platform,level,entity_id,campaign_id,budget,budget_type");
+  if (error) throw new Error(error.message);
+  return (data ?? []) as unknown as BudgetRow[];
 }
 
 export interface SyncStatus {

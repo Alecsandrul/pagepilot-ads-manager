@@ -15,6 +15,9 @@ HARD CONSTRAINTS (memory: reference_meta_winners_promotion_workflow):
     never revenue.
   * video_plays = video_play_actions (NOT the 3s view); video_views = the
     `video_view` action (3s). Hook rate = video_views / video_plays.
+  * thruplays = video_thruplay_watched_actions (ThruPlay: watched to 15s or
+    to completion). Hold rate = thruplays / video_views. Added 2026-09-02:
+    NDJSON files before that date lack the field even in `raw`.
 
 Usage:  sync_meta.py [--date YYYY-MM-DD] [--days N]
 Output: data/meta_<date>.ndjson (one file per day) + summary on stdout.
@@ -86,7 +89,8 @@ def fetch_day(token, campaigns, day):
         params = {
             "level": "ad",
             "fields": ("campaign_id,campaign_name,adset_id,adset_name,ad_id,ad_name,"
-                       "spend,impressions,clicks,actions,action_values,video_play_actions"),
+                       "spend,impressions,clicks,actions,action_values,video_play_actions,"
+                       "video_thruplay_watched_actions"),
             "time_range": json.dumps({"since": day, "until": day}),
             "limit": 500,
             "access_token": token,
@@ -113,6 +117,8 @@ def fetch_day(token, campaigns, day):
                     action_value(r.get("actions"), "video_view")),
                 "video_plays": (lambda v: int(v) if v is not None else None)(
                     action_value(r.get("video_play_actions"), "video_view")),
+                "thruplays": (lambda v: int(v) if v is not None else None)(
+                    action_value(r.get("video_thruplay_watched_actions"), "video_view")),
                 "purchases": action_value(r.get("actions"), "purchase") or 0,
                 "purchase_value": action_value(r.get("action_values"), "purchase"),
                 "raw": r,

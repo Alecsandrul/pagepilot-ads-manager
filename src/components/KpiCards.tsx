@@ -8,6 +8,8 @@ export interface Kpi {
   suffix?: string;
   /** Tooltip on the value, e.g. how an estimate is derived. */
   title?: string;
+  /** Color for the value, e.g. the ROAS verdict green/red. */
+  valueColor?: string;
 }
 
 export default function KpiCards({ kpis }: { kpis: Kpi[] }) {
@@ -51,6 +53,7 @@ export default function KpiCards({ kpis }: { kpis: Kpi[] }) {
               letterSpacing: "-0.02em",
               fontVariantNumeric: "tabular-nums",
               whiteSpace: "nowrap",
+              color: k.valueColor,
             }}
           >
             {k.value}
