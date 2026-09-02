@@ -73,3 +73,60 @@ Metric traps baked into the scripts (do not "fix" them away):
 - Vercel project + frontend build from the imported dashboard design.
 - Historical backfill beyond 2026-09-01 (`--days N` is ready on all three
   sync scripts).
+
+## Frontend
+
+Vite + React + TypeScript at the repo root (Vercel imports it directly).
+No UI framework: the design file `design/Ads Reporting Dashboard.dc.html`
+is the spec and the components recreate it with plain React and CSS.
+
+```
+src/
+  App.tsx                     auth gate (session -> Dashboard, else Login)
+  components/
+    Dashboard.tsx             all view state, data fetch, KPI + export logic
+    AdsTable.tsx              level chips, drill down, sticky table, totals, footer
+    DateRangePicker.tsx       presets (7/14/30 days ending yesterday) + custom
+    PlatformTabs.tsx          Meta / TikTok / Google with per platform spend
+    KpiCards.tsx              6 cards with delta vs previous equal length period
+    Login.tsx                 email + password (accounts created by an admin)
+    Dropdown.tsx              shared menu shell
+  lib/
+    supabase.ts               client from VITE_SUPABASE_URL / VITE_SUPABASE_ANON_KEY
+    data.ts                   paginated ad_daily fetch (never selects raw jsonb),
+                              sync_runs staleness check (>26h, error, missing)
+    aggregate.ts              entity trees per grain, pooled purchases exclusion
+    display.ts / format.ts    design faithful number formatting, USD/EUR/RON
+    dates.ts / csv.ts / types.ts
+```
+
+Rules the frontend enforces:
+
+- Reads ONLY Supabase; aggregation is client side (a 30 day window is a few
+  thousand rows, paginated past the PostgREST 1000 row cap). No 0003 views
+  migration was needed.
+- `purchases_are_pooled` rows (google) are excluded from purchases/value in
+  any aggregate that mixes pooled and unpooled sources (`sumMetrics`); the
+  Google tab shows them with a "pooled conversions, not purchases" hint.
+- Conversion value / ROAS render the placeholder where `purchase_value` is
+  null (tiktok). Budget is always the placeholder: budgets are not synced.
+- Delivery pill is DERIVED (spend or impressions on the platform's most
+  recent active day in range), because delivery status is not synced; it is
+  labeled Delivering / No delivery, never Active / Paused.
+- Google at Ad group / Ad level shows campaigns rolled up with a note;
+  TikTok Smart+ campaigns appear under Campaigns only, with a note.
+- A missing, stale (>26h) or errored `sync_runs` entry produces a warning
+  banner; the footer shows last sync age per platform. Never a silent zero.
+
+Dev:
+
+```
+cp .env.example .env.local   # fill VITE_SUPABASE_ANON_KEY (publishable key)
+npm install
+npm run dev                  # port 8080
+npm run typecheck && npm run build
+```
+
+Deploy: Vercel project pointed at this repo (root), env vars
+`VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY`. Handled by the main
+session, not from here.
