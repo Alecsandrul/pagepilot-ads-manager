@@ -50,7 +50,25 @@ else
 fi
 sleep 31
 
-python3 "$DIR/load.py" --date "$DATE" --platforms meta,tiktok,google --budgets require || FAILED=1
+# Entity snapshot (ad_entities, migration 0010): what EXISTS in the accounts,
+# with status and creation time. This is the ONLY source that can show an ad
+# which has been built but has never delivered - the insights APIs return no
+# row for one, so before this a new or paused creative was invisible by
+# construction (root cause, 2026-09-03: 24 ads of batches 99 to 106 built
+# 2026-09-02 and reported missing from the dashboard).
+err="$DIR/../data/entities_${DATE}.err"
+if python3 "$DIR/sync_entities.py" --date "$DATE" 2> "$err"; then
+  rm -f "$err"
+  echo "sync_entities: ok"
+else
+  echo "sync_entities: FAILED (stderr kept at $err)"
+  cat "$err"
+  FAILED=1
+fi
+sleep 31
+
+python3 "$DIR/load.py" --date "$DATE" --platforms meta,tiktok,google \
+  --budgets require --entities require || FAILED=1
 
 # Load the two older days of google's 3 day window (the newest was in the
 # main load). --budgets defaults to auto, so no budgets snapshot is expected

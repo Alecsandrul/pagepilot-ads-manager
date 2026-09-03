@@ -1,4 +1,4 @@
-import type { AdRow, BudgetRow, Entity, Level, Metrics, MetricKey, Platform } from "./types";
+import type { AdRow, BudgetRow, Entity, EntityRow, Level, Metrics, MetricKey, Platform } from "./types";
 import { PLATFORM_META } from "./types";
 
 export function emptyMetrics(): Metrics {
@@ -210,6 +210,104 @@ export function buildTree(platform: Platform, rows: AdRow[], opts?: BuildOpts): 
     campaignGrainOnly,
     m: sumMetrics(campaigns.map((c) => c.m)),
   };
+}
+
+/**
+ * Add the entities that EXIST but have no ad_daily row in the range, and
+ * annotate the ones that do with their current platform status.
+ *
+ * THE BUG THIS FIXES (2026-09-03): every metric in this dashboard comes from
+ * an INSIGHTS API, and insights only describe delivery. An ad that has been
+ * built but has not spent returns no insights row at all, so it never
+ * reached ad_daily and the dashboard could not show it however the UI was
+ * written. 98 of the 182 non-archived ads in the Meta Creative Testing
+ * campaign had never appeared, including all 24 ads of batches 99 to 106,
+ * built 2026-09-02 and left paused.
+ *
+ * WHICH zero-delivery entities are added: those live right now, and those
+ * CREATED INSIDE the selected range. That is the honest reading of "what
+ * exists in this window" - it surfaces everything new and everything
+ * running, without resurrecting hundreds of ads paused months ago (Meta
+ * alone carries 1,873 non-archived ad entities against 139 that delivered in
+ * a 30 day window). Widen the range and older builds appear on their own.
+ *
+ * Added rows carry zero metrics. Those are TRUE zeros, not missing numbers,
+ * so they move no total; they are marked noDelivery so the Delivery column
+ * can explain them instead of showing a bare "No delivery".
+ */
+export function mergeEntities(
+  tree: PlatformTree,
+  entities: EntityRow[],
+  range: { from: string; to: string }
+): void {
+  const mine = entities.filter((e) => e.platform === tree.platform);
+  const byLevel = { campaign: tree.campaigns, adset: tree.groups, ad: tree.ads } as const;
+  const levelNum = { campaign: 0, adset: 1, ad: 2 } as const;
+
+  // Parent name lookups, so an added row fills its Detail column the same
+  // way a delivering row does.
+  const campaignName = new Map<string, string>();
+  const adsetName = new Map<string, string>();
+  for (const e of mine) {
+    if (e.level === "campaign") campaignName.set(e.entity_id, e.entity_name || e.entity_id);
+    else if (e.level === "adset") adsetName.set(e.entity_id, e.entity_name || e.entity_id);
+  }
+
+  const createdInRange = (e: EntityRow) => {
+    if (!e.created_at) return false;
+    const day = e.created_at.slice(0, 10);
+    return day >= range.from && day <= range.to;
+  };
+
+  // is_active is a fact about RIGHT NOW, not about the selected window, so
+  // it may only pull rows into a range that reaches the present. Applying it
+  // to, say, last March would list today's live ads as zero spend rows in a
+  // month they did not exist. A historical range therefore admits only
+  // entities actually created inside it.
+  const twoDaysAgo = new Date();
+  twoDaysAgo.setDate(twoDaysAgo.getDate() - 2);
+  const rangeIsCurrent = range.to >= twoDaysAgo.toISOString().slice(0, 10);
+
+  for (const level of ["campaign", "adset", "ad"] as const) {
+    const list = byLevel[level];
+    const index = new Map(list.map((x) => [x.id, x]));
+    for (const row of mine) {
+      if (row.level !== level) continue;
+      const existing = index.get(row.entity_id);
+      if (existing) {
+        // It delivered in range: keep its real metrics and just attach the
+        // status, so an ad that spent early in the window and was then
+        // switched off reads "Paused" instead of a bare "No delivery".
+        existing.status = row.status;
+        existing.isLive = row.is_active;
+        existing.createdAt = row.created_at;
+        continue;
+      }
+      if (!(rangeIsCurrent && row.is_active) && !createdInRange(row)) continue;
+      list.push({
+        id: row.entity_id,
+        level: levelNum[level],
+        name: row.entity_name || row.entity_id,
+        sub:
+          level === "ad"
+            ? row.adset_id
+              ? adsetName.get(row.adset_id) ?? row.adset_id
+              : ""
+            : level === "adset"
+              ? row.campaign_id
+                ? campaignName.get(row.campaign_id) ?? row.campaign_id
+                : ""
+              : "",
+        campaignId: row.campaign_id ?? row.entity_id,
+        groupId: level === "ad" ? row.adset_id : level === "adset" ? row.entity_id : null,
+        noDelivery: true,
+        status: row.status,
+        isLive: row.is_active,
+        createdAt: row.created_at,
+        m: emptyMetrics(),
+      });
+    }
+  }
 }
 
 /**

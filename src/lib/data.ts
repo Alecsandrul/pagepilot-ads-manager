@@ -1,5 +1,5 @@
 import { supabase } from "./supabase";
-import type { AdRow, BudgetRow, Platform, SyncRun } from "./types";
+import type { AdRow, BudgetRow, EntityRow, Platform, SyncRun } from "./types";
 
 // NOTE: `thruplays` requires migration 0005 on the live DB - PostgREST
 // rejects the whole select if the column is missing. Deploy this frontend
@@ -51,6 +51,36 @@ export async function fetchBudgets(): Promise<BudgetRow[]> {
     .select("platform,level,entity_id,campaign_id,budget,budget_type");
   if (error) throw new Error(error.message);
   return (data ?? []) as unknown as BudgetRow[];
+}
+
+/**
+ * Everything that EXISTS in the ad accounts (ad_entities, migration 0010),
+ * regardless of delivery. Read whole: a few thousand narrow rows, and the UI
+ * needs the full set to work out what ad_daily is missing.
+ *
+ * Like fetchBudgets, an unauthenticated read is RLS filtered to zero rows
+ * with NO error, so a throw means "unknown", never "no entities exist". The
+ * table arriving with a later migration is a normal state: the caller falls
+ * back to insights-only rows and says so.
+ */
+export async function fetchEntities(): Promise<EntityRow[]> {
+  const { data: sess } = await supabase.auth.getSession();
+  if (!sess.session) throw new Error("no signed in session");
+  let all: EntityRow[] = [];
+  for (let i = 0; ; i++) {
+    const { data, error } = await supabase
+      .from("ad_entities")
+      .select(
+        "platform,level,entity_id,entity_name,campaign_id,adset_id,status,is_active,created_at"
+      )
+      .order("entity_id", { ascending: true })
+      .range(i * PAGE, (i + 1) * PAGE - 1);
+    if (error) throw new Error(error.message);
+    const rows = (data ?? []) as unknown as EntityRow[];
+    all = all.concat(rows);
+    if (rows.length < PAGE) break;
+  }
+  return all;
 }
 
 export interface SyncStatus {

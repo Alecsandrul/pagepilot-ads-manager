@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type * as React from "react";
-import { applyBudgets, buildTree, metric, sumMetrics, type PlatformTree } from "../lib/aggregate";
+import { applyBudgets, buildTree, mergeEntities, metric, sumMetrics, type PlatformTree } from "../lib/aggregate";
 import { toCsv, downloadCsv } from "../lib/csv";
-import { fetchAdRows, fetchBudgets, fetchSyncStatus, type SyncStatus } from "../lib/data";
+import { fetchAdRows, fetchBudgets, fetchEntities, fetchSyncStatus, type SyncStatus } from "../lib/data";
 import { DEFAULT_RANGE, previousRange, relativeTime } from "../lib/dates";
 import { fmtCell, roasColor } from "../lib/display";
 import { dec, EMPTY, MINUS, money, num, pct } from "../lib/format";
@@ -18,6 +18,7 @@ import {
   type DateRange,
   type Density,
   type Entity,
+  type EntityRow,
   type Level,
   type MetricKey,
   type Platform,
@@ -77,6 +78,14 @@ export default function Dashboard() {
   const [budgets, setBudgets] = useState<BudgetRow[]>([]);
   /** Set when entity_budgets could not be read: budgets show placeholders. */
   const [budgetsError, setBudgetsError] = useState<string | null>(null);
+  /**
+   * Everything that exists in the accounts (ad_entities, migration 0010).
+   * Without it the table can only ever show what DELIVERED, which is what
+   * hid the 24 newly built batch 99 to 106 ads on 2026-09-03.
+   */
+  const [entities, setEntities] = useState<EntityRow[]>([]);
+  /** Set when ad_entities could not be read: only delivering rows are shown. */
+  const [entitiesError, setEntitiesError] = useState<string | null>(null);
 
   // View state
   const [platform, setPlatform] = useState<Platform>("meta");
@@ -131,6 +140,19 @@ export default function Dashboard() {
           // instead of failing silently.
           setBudgetsError(e.message);
         });
+      fetchEntities()
+        .then((e) => {
+          setEntities(e);
+          setEntitiesError(null);
+        })
+        .catch((e: Error) => {
+          // Falls back to the old insights-only behaviour: ads that never
+          // delivered go missing again. That is exactly the failure this
+          // table was added to fix, so the banner must say it out loud
+          // rather than quietly showing a shorter list.
+          setEntities([]);
+          setEntitiesError(e.message);
+        });
     };
     refreshStatus();
     // Re-read on tab focus: a ONE SHOT fetch left a long lived tab stuck
@@ -165,11 +187,17 @@ export default function Dashboard() {
     for (const p of PLATFORMS) {
       const platformRows = (rows ?? []).filter((r) => r.platform === p);
       cur[p] = buildTree(p, platformRows.filter((r) => r.date >= range.from), opts);
+      // Add what EXISTS but did not deliver, before budgets attach: a newly
+      // built ad set owns a budget too, and should show it.
+      mergeEntities(cur[p]!, entities, range);
       applyBudgets(cur[p]!, budgets);
+      // The previous period feeds KPI deltas only. Merging zero rows into it
+      // would add nothing and would compare against entities that did not
+      // exist back then, so it stays purely insights based.
       before[p] = buildTree(p, platformRows.filter((r) => r.date < range.from), opts);
     }
     return { cur: cur as Record<Platform, PlatformTree>, before: before as Record<Platform, PlatformTree> };
-  }, [rows, range.from, tiktokValue, budgets]);
+  }, [rows, range, tiktokValue, budgets, entities]);
 
   const tree = trees.cur[platform];
   const prevTree = trees.before[platform];
@@ -225,8 +253,22 @@ export default function Dashboard() {
             : `${n} Smart+ campaigns appear under Campaigns only: TikTok's API gives no per ad breakdown for Smart+.`;
       }
     }
+
+    // Say when rows are present that never delivered, so a screen full of
+    // zeros reads as a fact about the ads rather than as broken data. These
+    // come from ad_entities (migration 0010) and are the whole reason a
+    // newly built creative is visible at all.
+    const zero = items.filter((e) => e.noDelivery).length;
+    if (zero > 0) {
+      const term = meta.terms[level].toLowerCase();
+      const one = zero === 1;
+      const zeroNote =
+        `${zero} ${one ? term.replace(/s$/, "") : term} here ${one ? "has" : "have"} not spent in this range ` +
+        `(built or live but not delivering). ${one ? "It shows" : "They show"} zero, not missing data.`;
+      note = note ? `${note} ${zeroNote}` : zeroNote;
+    }
     return { baseItems: items, notice: note };
-  }, [tree, level, parent, isGoogle, platform]);
+  }, [tree, level, parent, isGoogle, platform, meta]);
 
   const items = useMemo(() => {
     let out = baseItems;
@@ -438,6 +480,11 @@ export default function Dashboard() {
         }
         if (budgetsError) {
           problems.push(`budgets could not be read (${budgetsError}); Budget column shows placeholders`);
+        }
+        if (entitiesError) {
+          problems.push(
+            `the list of built ads could not be read (${entitiesError}); ads that have not spent yet are missing from this table`
+          );
         }
         if (problems.length === 0) return null;
         return (

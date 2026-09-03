@@ -64,6 +64,29 @@ export interface BudgetRow {
   budget_type: "daily" | "lifetime";
 }
 
+/**
+ * One row of public.ad_entities (migration 0010): a thing that EXISTS in the
+ * ad account, whether or not it ever delivered.
+ *
+ * WHY THIS TABLE EXISTS: ad_daily is built from the INSIGHTS APIs, and
+ * insights only describe delivery. An ad that has been built but never spent
+ * returns no insights row at all, so it can never reach ad_daily and could
+ * never appear here. On 2026-09-03 that hid all 24 ads of batches 99 to 106,
+ * built the day before and left paused.
+ */
+export interface EntityRow {
+  platform: Platform;
+  level: "campaign" | "adset" | "ad";
+  entity_id: string;
+  entity_name: string | null;
+  campaign_id: string | null;
+  adset_id: string | null;
+  /** The platform's own word, verbatim: ACTIVE, PAUSED, ADSET_PAUSED, ENABLED. */
+  status: string | null;
+  is_active: boolean;
+  created_at: string | null;
+}
+
 export interface Entity {
   id: string;
   level: Level;
@@ -73,6 +96,18 @@ export interface Entity {
   groupId: string | null;
   /** Tooltip explaining a campaign grain row (google, TikTok Smart+). */
   grainTip?: string;
+  /**
+   * Set on entities that EXIST (ad_entities) but have no ad_daily row in the
+   * selected range. Every metric on them is a true zero, not a missing
+   * number, and the Delivery column says why instead of omitting the row.
+   */
+  noDelivery?: boolean;
+  /** Raw platform status from ad_entities, when known. */
+  status?: string | null;
+  /** Platform considers this live right now (parent statuses folded in). */
+  isLive?: boolean;
+  /** Creation time from ad_entities, when the platform reports one. */
+  createdAt?: string | null;
   /** Current budget this entity owns (entity_budgets), attached client side. */
   budget?: { amount: number; type: "daily" | "lifetime" };
   /** Muted note when the entity owns no budget: "CBO" or "Ad set budgets". */
