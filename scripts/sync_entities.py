@@ -229,6 +229,49 @@ def fetch_google(env):
     return rows
 
 
+# ------------------------------------------------------- ancestor fold
+
+def fold_parents(rows):
+    """An entity is live only if EVERY ancestor is live. Returns how many
+    rows this corrected, per platform.
+
+    WHY (found 2026-09-03, this account): fetch_google already walks the
+    ancestors because Google's per level status ignores them outright. Meta
+    and TikTok were trusted to fold the parents into effective_status /
+    secondary_status themselves, and they MOSTLY do (ADSET_PAUSED,
+    CAMPAIGN_PAUSED, AD_STATUS_ADGROUP_DISABLE). The exception is
+    WITH_ISSUES, which OUTRANKS the parent pause in Meta's precedence: 9 ads
+    in this account reported WITH_ISSUES while sitting inside a PAUSED
+    campaign, so is_active said true for ads that cannot possibly deliver.
+    Those 9 then showed a "Live, issues" pill in the dashboard AND were
+    pulled into the ad level table by mergeEntities under a campaign that was
+    itself, correctly, not listed - the only 9 orphan rows in the whole
+    table.
+
+    Idempotent, and a no-op wherever the platform already folded correctly
+    (TikTok: 0 rows, Google: 0 rows on 2026-09-03). Parents are indexed by
+    entity_id alone, which is safe: only Google's ad_group_ad has a composite
+    identity, campaign and ad_group ids are unique on all three platforms.
+    """
+    live = {(r["platform"], r["level"], r["entity_id"]): r["is_active"]
+            for r in rows if r["level"] in ("campaign", "adset")}
+    fixed = {}
+    for r in rows:
+        if not r["is_active"] or r["level"] == "campaign":
+            continue
+        parents = [("campaign", r["campaign_id"])]
+        if r["level"] == "ad":
+            parents.append(("adset", r["adset_id"]))
+        # A parent we did not fetch (archived, or filtered out above) is
+        # NOT treated as dead: absence is unknown, and guessing dead would
+        # hide a live ad. Only an explicit False demotes the child.
+        if any(live.get((r["platform"], lvl, pid)) is False
+               for lvl, pid in parents if pid):
+            r["is_active"] = False
+            fixed[r["platform"]] = fixed.get(r["platform"], 0) + 1
+    return fixed
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--date",
@@ -257,6 +300,11 @@ def main():
         print(f"entities: not writing file, failed platforms: {failed}",
               file=sys.stderr)
         sys.exit(1)
+    # Only safe once ALL platforms are in: the fold reads a child's parents
+    # out of the same snapshot.
+    for platform, n in sorted(fold_parents(rows).items()):
+        print(f"entities {platform}: {n} rows demoted to inactive because an "
+              f"ancestor is paused")
     if args.dry_run:
         print(f"entities: DRY RUN, {len(rows)} rows, no file written")
         return
