@@ -29,17 +29,77 @@ export interface DeliveryState {
 export function deliveryState(e: Entity, deliveredLatest: boolean): DeliveryState {
   const GREEN = { color: "#1E7B4D", bg: "#E4F3EA" };
   const AMBER = { color: "#8A5300", bg: "#FFF4E5" };
+  const RED = { color: "#C0392B", bg: "#FBEAE8" };
   const GRAY = { color: "#65676B", bg: "#F0F2F5" };
   const s = (e.status ?? "").toUpperCase();
 
+  // Rejected and in-review come FIRST: each explains a zero better than any
+  // pause does, and a rejected ad must never read as merely "no delivery".
+  if (s.includes("DISAPPROVED") || s.includes("REJECT")) {
+    return {
+      label: "Rejected",
+      ...RED,
+      tip: `The platform rejected this, so it cannot deliver. It reports ${e.status}.`,
+    };
+  }
+  // PARTIALLY_APPROVED is NOT pending: it runs on the placements that passed.
+  if (
+    !s.includes("PARTIALLY_APPROVED") &&
+    (s.includes("PENDING_REVIEW") ||
+      s.includes("IN_PROCESS") ||
+      s.includes("PREAPPROVED") ||
+      s.includes("REVIEW"))
+  ) {
+    return {
+      label: "In review",
+      ...AMBER,
+      tip: `Waiting on platform review, so it has not started delivering. It reports ${e.status}.`,
+    };
+  }
+  if (s.includes("PENDING_BILLING")) {
+    return {
+      label: "Billing hold",
+      ...RED,
+      tip: `Blocked on billing information, so it cannot deliver. It reports ${e.status}.`,
+    };
+  }
+
+  // "Running, but something is wrong" is a real Meta state (WITH_ISSUES), and
+  // TikTok's partially approved is its analog. Both DELIVER, so they stay
+  // distinct from green and from paused.
+  if (s.includes("WITH_ISSUES") || s.includes("PARTIALLY_APPROVED")) {
+    return {
+      label: deliveredLatest ? "Delivering, issues" : "Live, issues",
+      ...AMBER,
+      tip: deliveredLatest
+        ? `Delivering, but the platform flags a problem (${e.status}). Some placements may be restricted.`
+        : `Live with a problem flagged (${e.status}) and no spend on the most recent day in this range.`,
+    };
+  }
+
   if (deliveredLatest) return { label: "Delivering", ...GREEN };
 
+  // Which parent switched it off. Meta and TikTok name it in the status
+  // itself; Google does NOT (its per level status ignores ancestors, so an
+  // ad under a paused campaign still reads ENABLED). For Google the sync
+  // already resolved the truth into is_active, and a bare ENABLED that is
+  // not live can only mean a parent is paused - saying "Paused ... reports
+  // ENABLED" would contradict itself.
   const pausedBy =
     s.includes("ADSET_PAUSED") || s.includes("ADGROUP_DISABLE")
       ? "ad set"
       : s.includes("CAMPAIGN_PAUSED") || s.includes("CAMPAIGN_DISABLE")
         ? "campaign"
-        : null;
+        : s === "ENABLED" && !e.isLive
+          ? "parent"
+          : null;
+  if (pausedBy === "parent") {
+    return {
+      label: "Paused (parent)",
+      ...GRAY,
+      tip: "Its own status is ENABLED, but an ad group or campaign above it is paused, so it cannot deliver.",
+    };
+  }
 
   if (e.noDelivery) {
     // It exists, but has nothing in this date range at all.

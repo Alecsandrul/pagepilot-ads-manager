@@ -75,6 +75,16 @@ def _meta_pages(token, edge, fields):
         params["after"] = after
 
 
+# Meta effective_status values that can still DELIVER. WITH_ISSUES is the
+# trap: it means "running, but something is wrong" (a rejected placement, a
+# warning), not "stopped" - 9 entities in this account sat in it, and calling
+# them inactive would have reported live spend under a dead looking pill.
+# Everything else either cannot deliver (PAUSED, ADSET_PAUSED,
+# CAMPAIGN_PAUSED, DISAPPROVED, PENDING_BILLING_INFO) or has not started yet
+# (PENDING_REVIEW, IN_PROCESS, PREAPPROVED).
+META_LIVE_STATUS = {"ACTIVE", "WITH_ISSUES"}
+
+
 def fetch_meta(env):
     """Campaigns, ad sets and ads with effective_status and created_time.
 
@@ -89,7 +99,7 @@ def fetch_meta(env):
             continue
         rows.append(row("meta", "campaign", c["id"], c.get("name"), None, None,
                         c.get("effective_status"),
-                        c.get("effective_status") == "ACTIVE",
+                        c.get("effective_status") in META_LIVE_STATUS,
                         c.get("created_time")))
     for a in _meta_pages(token, "adsets",
                          "id,name,campaign_id,effective_status,created_time"):
@@ -97,7 +107,7 @@ def fetch_meta(env):
             continue
         rows.append(row("meta", "adset", a["id"], a.get("name"),
                         a.get("campaign_id"), None, a.get("effective_status"),
-                        a.get("effective_status") == "ACTIVE",
+                        a.get("effective_status") in META_LIVE_STATUS,
                         a.get("created_time")))
     for d in _meta_pages(token, "ads",
                          "id,name,campaign_id,adset_id,effective_status,created_time"):
@@ -106,7 +116,7 @@ def fetch_meta(env):
         rows.append(row("meta", "ad", d["id"], d.get("name"),
                         d.get("campaign_id"), d.get("adset_id"),
                         d.get("effective_status"),
-                        d.get("effective_status") == "ACTIVE",
+                        d.get("effective_status") in META_LIVE_STATUS,
                         d.get("created_time")))
     return rows
 
