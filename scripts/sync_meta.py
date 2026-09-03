@@ -18,6 +18,14 @@ HARD CONSTRAINTS (memory: reference_meta_winners_promotion_workflow):
   * thruplays = video_thruplay_watched_actions (ThruPlay: watched to 15s or
     to completion). Hold rate = thruplays / video_views. Added 2026-09-02:
     NDJSON files before that date lack the field even in `raw`.
+  * reach = unique people, the DENOMINATOR of Frequency (migration 0011,
+    added 2026-09-03). We deliberately do NOT store the `frequency` field
+    Meta returns beside it: it is a ratio, a ratio cannot be summed, and the
+    UI recomputes sum(impressions)/sum(reach) at every aggregated row.
+    Verified live 2026-09-03 that Meta's own frequency equals
+    impressions/reach to 6 decimals, so that recomputation is exact per day.
+    Reach itself is NOT additive across days - migration 0011 records the
+    measured size of the gap against Meta's deduplicated window figure.
 
 Usage:  sync_meta.py [--date YYYY-MM-DD] [--days N]
 Output: data/meta_<date>.ndjson (one file per day) + summary on stdout.
@@ -89,8 +97,8 @@ def fetch_day(token, campaigns, day):
         params = {
             "level": "ad",
             "fields": ("campaign_id,campaign_name,adset_id,adset_name,ad_id,ad_name,"
-                       "spend,impressions,clicks,actions,action_values,video_play_actions,"
-                       "video_thruplay_watched_actions"),
+                       "spend,impressions,reach,clicks,actions,action_values,"
+                       "video_play_actions,video_thruplay_watched_actions"),
             "time_range": json.dumps({"since": day, "until": day}),
             "limit": 500,
             "access_token": token,
@@ -112,6 +120,11 @@ def fetch_day(token, campaigns, day):
                 "ad_name": r.get("ad_name"),
                 "spend": spend,
                 "impressions": imps,
+                # NULL, never 0, when Meta omits reach: an unknown denominator
+                # must render as the Frequency placeholder, not as a division
+                # by zero or a silently wrong ratio.
+                "reach": (lambda v: int(v) if v not in (None, "") else None)(
+                    r.get("reach")),
                 "clicks": int(r.get("clicks", 0)),
                 "video_views": (lambda v: int(v) if v is not None else None)(
                     action_value(r.get("actions"), "video_view")),

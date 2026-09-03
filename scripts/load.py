@@ -35,17 +35,18 @@ DB_HOST = "db.xtrapxzbfuovnutldete.supabase.co"
 DATA_DIR = pathlib.Path(__file__).resolve().parent.parent / "data"
 
 COLS = ["platform", "date", "campaign_id", "campaign_name", "adset_id",
-        "adset_name", "ad_id", "ad_name", "spend", "impressions", "clicks",
-        "video_views", "video_plays", "thruplays", "purchases",
+        "adset_name", "ad_id", "ad_name", "spend", "impressions", "reach",
+        "clicks", "video_views", "video_plays", "thruplays", "purchases",
         "purchase_value", "purchases_are_pooled", "raw"]
 METRIC_COLS = ["campaign_name", "adset_name", "ad_name", "spend", "impressions",
-               "clicks", "video_views", "video_plays", "thruplays", "purchases",
-               "purchase_value", "purchases_are_pooled", "raw"]
+               "reach", "clicks", "video_views", "video_plays", "thruplays",
+               "purchases", "purchase_value", "purchases_are_pooled", "raw"]
 # Columns that may not be writable yet: thruplays arrives with migration
 # 0005, purchases_are_pooled is a GENERATED column until 0007 recreates it
-# as plain. Migrations are applied by the main session, not this repo, and
-# the daily cron can run this code first - so probe and drop as needed.
-OPTIONAL_COLS = ["thruplays", "purchases_are_pooled"]
+# as plain, reach arrives with migration 0011. Migrations are applied by the
+# main session, not this repo, and the daily cron can run this code first -
+# so probe and drop as needed.
+OPTIONAL_COLS = ["thruplays", "purchases_are_pooled", "reach"]
 BUDGET_COLS = ["platform", "level", "entity_id", "campaign_id", "entity_name",
                "budget", "budget_type"]
 # ad_entities (migration 0010): what EXISTS in the accounts, with status and
