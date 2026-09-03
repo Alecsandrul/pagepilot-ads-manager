@@ -72,7 +72,11 @@ export default function Dashboard() {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [sync, setSync] = useState<SyncStatus | null>(null);
+  /** Set when sync_runs could not be READ: distinct from "no sync ran". */
+  const [syncUnreadable, setSyncUnreadable] = useState<string | null>(null);
   const [budgets, setBudgets] = useState<BudgetRow[]>([]);
+  /** Set when entity_budgets could not be read: budgets show placeholders. */
+  const [budgetsError, setBudgetsError] = useState<string | null>(null);
 
   // View state
   const [platform, setPlatform] = useState<Platform>("meta");
@@ -105,15 +109,40 @@ export default function Dashboard() {
 
   useEffect(load, [load]);
   useEffect(() => {
-    fetchSyncStatus()
-      .then(setSync)
-      .catch(() => setSync(null));
-    fetchBudgets()
-      .then(setBudgets)
-      .catch(() => {
-        // Table missing (pre migration 0006) or unreachable: no budgets,
-        // every Budget cell shows its placeholder.
-      });
+    const refreshStatus = () => {
+      fetchSyncStatus()
+        .then((s) => {
+          setSync(s);
+          setSyncUnreadable(null);
+        })
+        .catch((e: Error) => {
+          // Cannot read is NOT "never ran" - say so in the banner instead
+          // of hiding it (honesty doctrine; live bug 2026-09-03).
+          setSync(null);
+          setSyncUnreadable(e.message);
+        });
+      fetchBudgets()
+        .then((b) => {
+          setBudgets(b);
+          setBudgetsError(null);
+        })
+        .catch((e: Error) => {
+          // Budgets stay empty (placeholders render); the banner says why
+          // instead of failing silently.
+          setBudgetsError(e.message);
+        });
+    };
+    refreshStatus();
+    // Re-read on tab focus: a ONE SHOT fetch left a long lived tab stuck
+    // forever with whatever it saw at mount - the live 2026-09-03 bug was a
+    // tab opened before entity_budgets was first loaded, showing the
+    // placeholder in every Budget cell while the table sat full (an empty
+    // authenticated read raises no error). Sync status ages the same way.
+    const onVisible = () => {
+      if (document.visibilityState === "visible") refreshStatus();
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    window.addEventListener("focus", onVisible);
     fetchTiktokValue()
       .then((v) => {
         setTiktokValue(v);
@@ -122,6 +151,10 @@ export default function Dashboard() {
       .catch(() => {
         // Table missing or unreachable: the default stands.
       });
+    return () => {
+      document.removeEventListener("visibilitychange", onVisible);
+      window.removeEventListener("focus", onVisible);
+    };
   }, []);
 
   // Trees for the current and previous period, per platform
@@ -393,21 +426,35 @@ export default function Dashboard() {
         flexDirection: "column",
       }}
     >
-      {/* Sync problem banner: schema rule, never render a silent zero */}
-      {sync && sync.problems.length > 0 && (
-        <div
-          style={{
-            padding: "8px 28px",
-            background: "#FFF4E5",
-            color: "#8A5300",
-            fontSize: 12.5,
-            fontWeight: 500,
-            borderBottom: "1px solid #F0D9B5",
-          }}
-        >
-          {`Data may be incomplete. ${sync.problems.join(" · ")}`}
-        </div>
-      )}
+      {/* Sync problem banner: schema rule, never render a silent zero -
+          and never claim "no sync ran" when the status simply could not be
+          read (the two are kept distinct). */}
+      {(() => {
+        const problems: string[] = [];
+        if (syncUnreadable) {
+          problems.push(`sync status could not be read (${syncUnreadable}); data freshness unknown`);
+        } else if (sync) {
+          problems.push(...sync.problems);
+        }
+        if (budgetsError) {
+          problems.push(`budgets could not be read (${budgetsError}); Budget column shows placeholders`);
+        }
+        if (problems.length === 0) return null;
+        return (
+          <div
+            style={{
+              padding: "8px 28px",
+              background: "#FFF4E5",
+              color: "#8A5300",
+              fontSize: 12.5,
+              fontWeight: 500,
+              borderBottom: "1px solid #F0D9B5",
+            }}
+          >
+            {`Data may be incomplete. ${problems.join(" · ")}`}
+          </div>
+        );
+      })()}
 
       {/* Header */}
       <div

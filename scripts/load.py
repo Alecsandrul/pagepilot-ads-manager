@@ -189,6 +189,13 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--date", default=(dt.date.today() - dt.timedelta(days=1)).isoformat())
     ap.add_argument("--platforms", default="meta,tiktok,google")
+    # Budgets are a CURRENT snapshot tied to the daily run, not to the day
+    # being (re)loaded. "require" (daily_sync.sh): a missing snapshot is a
+    # recorded sync_runs error. "auto" (backfill.py and manual re-loads of
+    # historic days): load the file if present, otherwise skip with a note -
+    # the 2026-09-03 backfill recorded 92 bogus budgets ERROR rows because
+    # the old behavior demanded a budgets file for every historic date.
+    ap.add_argument("--budgets", choices=["auto", "require"], default="auto")
     args = ap.parse_args()
     password = db_pass()
     failed = False
@@ -245,7 +252,10 @@ def main():
         print(f"budgets: table probe failed ({e})", file=sys.stderr)
     if have_budgets:
         started = dt.datetime.now(dt.timezone.utc).isoformat()
-        if not bpath.exists():
+        if not bpath.exists() and args.budgets == "auto":
+            print(f"budgets: no snapshot for {args.date} (--budgets auto) - skipped",
+                  file=sys.stderr)
+        elif not bpath.exists():
             err_file = DATA_DIR / f"budgets_{args.date}.err"
             detail = err_file.read_text()[-800:] if err_file.exists() else \
                 "no stderr captured - sync_budgets never ran or wrote nothing"
