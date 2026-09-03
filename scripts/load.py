@@ -267,8 +267,11 @@ def main():
         cols.remove(c)
         metric_cols.remove(c)
 
-    for platform in args.platforms.split(","):
-        platform = platform.strip()
+    # An empty --platforms is a legitimate request: "load only the budgets
+    # and entities snapshots". Without the filter an empty string split to
+    # [''] and recorded a sync_runs row for a platform named '', which the
+    # platform check constraint then rejected.
+    for platform in [p.strip() for p in args.platforms.split(",") if p.strip()]:
         started = dt.datetime.now(dt.timezone.utc).isoformat()
         path = DATA_DIR / f"{platform}_{args.date}.ndjson"
         if not path.exists():
