@@ -24,6 +24,7 @@ import {
   type Platform,
 } from "../lib/types";
 import AdsTable, { type ParentRef, type SortState } from "./AdsTable";
+import ChangePassword from "./ChangePassword";
 import DateRangePicker from "./DateRangePicker";
 import Dropdown from "./Dropdown";
 import KpiCards, { type Kpi } from "./KpiCards";
@@ -99,6 +100,9 @@ export default function Dashboard() {
   const [hiddenCols, setHiddenCols] = useState<Set<MetricKey>>(new Set());
   const [colsOpen, setColsOpen] = useState(false);
   const [displayOpen, setDisplayOpen] = useState(false);
+  /** Change password dialog. A dialog, not a route, so the table and its
+   *  30 day fetch survive the round trip. */
+  const [pwdOpen, setPwdOpen] = useState(false);
 
   // TikTok assumed $ per result (app_settings, migration 0004)
   const [tiktokValue, setTiktokValue] = useState<number>(TIKTOK_VALUE_DEFAULT);
@@ -643,9 +647,18 @@ export default function Dashboard() {
             Export
           </div>
 
+          {/* Identity actions. "Change password" sits beside "Sign out"
+              because that is the only place the signed in user is
+              represented in this UI (Alex, 2026-09-03). */}
+          <div
+            onClick={() => setPwdOpen(true)}
+            style={{ fontSize: 12.5, color: "#8A8D91", cursor: "pointer", marginLeft: 6 }}
+          >
+            Change password
+          </div>
           <div
             onClick={() => supabase.auth.signOut()}
-            style={{ fontSize: 12.5, color: "#8A8D91", cursor: "pointer", marginLeft: 6 }}
+            style={{ fontSize: 12.5, color: "#8A8D91", cursor: "pointer" }}
           >
             Sign out
           </div>
@@ -702,6 +715,8 @@ export default function Dashboard() {
           footerRight={footerRight}
         />
       )}
+
+      {pwdOpen && <ChangePassword onClose={() => setPwdOpen(false)} />}
     </div>
   );
 }
