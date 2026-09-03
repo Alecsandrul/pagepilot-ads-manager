@@ -41,6 +41,11 @@ export async function fetchAdRows(from: string, to: string): Promise<AdRow[]> {
  * budgets" and every Budget cell shows its placeholder.
  */
 export async function fetchBudgets(): Promise<BudgetRow[]> {
+  // Same cannot-read guard as fetchSyncStatus: an unauthenticated read is
+  // RLS filtered to zero rows with NO error, and empty budgets must render
+  // as "could not be read", never as "no budgets exist".
+  const { data: sess } = await supabase.auth.getSession();
+  if (!sess.session) throw new Error("no signed in session");
   const { data, error } = await supabase
     .from("entity_budgets")
     .select("platform,level,entity_id,campaign_id,budget,budget_type");
@@ -60,24 +65,44 @@ export interface SyncStatus {
  * silent zero.
  */
 export async function fetchSyncStatus(): Promise<SyncStatus> {
-  const { data, error } = await supabase
-    .from("sync_runs")
-    .select("platform,started_at,finished_at,status,rows_written,error")
-    .order("started_at", { ascending: false })
-    .limit(60);
-  if (error) throw new Error(error.message);
+  // Cannot-read is NOT zero-rows: without a signed in session RLS silently
+  // filters sync_runs to nothing, and an empty result must never masquerade
+  // as "no sync has ever run". Throw instead; the caller reports the status
+  // as unreadable (live bug, 2026-09-03).
+  const { data: sess } = await supabase.auth.getSession();
+  if (!sess.session) throw new Error("no signed in session");
+
+  const platforms: Platform[] = ["meta", "tiktok", "google"];
+  // One query PER platform. A flat limit(60) over all rows let the 32 day
+  // google backfill (google + budgets rows) push meta and tiktok's latest
+  // runs out of the window - the newest meta row sat at position 132 - and
+  // the banner falsely claimed "no sync has ever run" (live bug,
+  // 2026-09-03). A per platform limit(1) cannot be crowded out.
+  const results = await Promise.all(
+    platforms.map((p) =>
+      supabase
+        .from("sync_runs")
+        .select("platform,started_at,finished_at,status,rows_written,error")
+        .eq("platform", p)
+        .order("started_at", { ascending: false })
+        .limit(1)
+    )
+  );
 
   const latest: Partial<Record<Platform, SyncRun>> = {};
-  for (const run of (data ?? []) as unknown as SyncRun[]) {
-    if (!latest[run.platform]) latest[run.platform] = run;
-  }
+  platforms.forEach((p, i) => {
+    const { data, error } = results[i];
+    if (error) throw new Error(`${p}: ${error.message}`);
+    const run = (data ?? [])[0] as unknown as SyncRun | undefined;
+    if (run) latest[p] = run;
+  });
 
   const problems: string[] = [];
-  const platforms: Platform[] = ["meta", "tiktok", "google"];
   for (const p of platforms) {
     const run = latest[p];
     if (!run) {
-      problems.push(`${p}: no sync has ever run`);
+      // Reached only on an authenticated, error free, genuinely empty read.
+      problems.push(`${p}: no sync recorded yet`);
       continue;
     }
     if (run.status === "error") {

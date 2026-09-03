@@ -43,7 +43,7 @@ else
 fi
 sleep 31
 
-python3 "$DIR/load.py" --date "$DATE" --platforms meta,tiktok,google || FAILED=1
+python3 "$DIR/load.py" --date "$DATE" --platforms meta,tiktok,google --budgets require || FAILED=1
 
 echo "=== daily_sync $DATE done $(date -Is) exit $FAILED ==="
 exit $FAILED
