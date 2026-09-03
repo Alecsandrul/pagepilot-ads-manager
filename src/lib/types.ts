@@ -21,6 +21,8 @@ export interface AdRow {
   spend: number;
   impressions: number;
   clicks: number;
+  /** Unique people on this DAY (migration 0011). NULL for google and for days synced before it. */
+  reach: number | null;
   video_views: number | null;
   video_plays: number | null;
   thruplays: number | null;
@@ -40,6 +42,27 @@ export interface Metrics {
   purchaseValue: number | null;
   /** True when purchaseValue is an ESTIMATE (tiktok assumed $ per result), not platform reported. */
   valueIsEstimated: boolean;
+  /**
+   * Sum of DAILY reach (migration 0011). Frequency is impressions / reach and
+   * is never summed; it is recomputed from this pair at every row, like hook
+   * rate. Beware what the sum means: unique people do not add across days, so
+   * over a multi day range this is person days, and the resulting frequency
+   * is the average per day, BELOW the platform's deduplicated window figure
+   * (measured 1.88 here vs 2.64 in Meta over 7 days, 2026-09-03). Null when
+   * no row in the aggregate carried a reach (google, and pre 0011 days).
+   */
+  reach: number | null;
+  /**
+   * How many ad_daily rows contributed to `reach`. EXACTLY ONE means the
+   * frequency derived from it is the platform's own number; more than one
+   * means people were counted once per contributing row and the frequency
+   * is a LOWER BOUND. Both axes lose the same way: across days (a person
+   * seen Monday and Tuesday counts twice) and across children (a person
+   * seen by two ads of one campaign counts twice). Measured 2026-09-02 on
+   * campaign 120235045548680189, one day, 43 ads: rolling the ads up gives
+   * 1.29 where Meta's own campaign row says 1.99, 35% low.
+   */
+  reachRows: number;
   /** 3 second video plays (meta: video_view action; tiktok: video_watched_2s). Null when never synced. */
   videoViews: number | null;
   /** Video starts (video_play_actions on both platforms). Null when never synced. */
@@ -126,6 +149,7 @@ export type MetricKey =
   | "holdrate"
   | "cpc"
   | "cpm"
+  | "frequency"
   | "conv"
   | "cpa"
   | "revenue"
@@ -170,6 +194,19 @@ export const COLUMNS: ColumnDef[] = [
   },
   { k: "cpc", l: "CPC", w: 100, a: "flex-end" },
   { k: "cpm", l: "CPM", w: 100, a: "flex-end" },
+  {
+    k: "frequency",
+    l: "Frequency",
+    w: 115,
+    a: "flex-end",
+    tip:
+      "Frequency = impressions divided by reach, recomputed at every row from the sums, never averaged. " +
+      "Reach is synced one day at a time, and the same person seen on two days counts twice in the sum, " +
+      "so over a multi day range this reads as impressions per person per day and sits BELOW the " +
+      "deduplicated figure Ads Manager shows for the same window (measured 1.88 here against 2.64 in " +
+      "Meta over 7 days). A single day range matches the platform exactly. Google reports unique users " +
+      "only at campaign level while we sync google at ad level, so it stays blank there.",
+  },
   { k: "conv", l: "Results", w: 110, a: "flex-end" },
   { k: "cpa", l: "Cost per result", w: 150, a: "flex-end" },
   { k: "revenue", l: "Conversion value", w: 160, a: "flex-end" },

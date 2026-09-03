@@ -24,6 +24,8 @@ export function emptyMetrics(): Metrics {
     purchases: 0,
     purchaseValue: null,
     valueIsEstimated: false,
+    reach: null,
+    reachRows: 0,
     videoViews: null,
     videoPlays: null,
     thruplays: null,
@@ -39,6 +41,13 @@ function addRow(m: Metrics, r: AdRow): void {
   m.purchases += r.purchases || 0;
   if (r.purchase_value != null) {
     m.purchaseValue = (m.purchaseValue ?? 0) + r.purchase_value;
+  }
+  // Reach is summed ONLY so that Frequency can be a ratio of sums. The sum
+  // itself is never displayed: unique people do not add across days, so it
+  // is a person day count, not a reach. See Metrics.reach.
+  if (r.reach != null) {
+    m.reach = (m.reach ?? 0) + r.reach;
+    m.reachRows += 1;
   }
   if (r.video_views != null) m.videoViews = (m.videoViews ?? 0) + r.video_views;
   if (r.video_plays != null) m.videoPlays = (m.videoPlays ?? 0) + r.video_plays;
@@ -72,6 +81,8 @@ export function sumMetrics(list: Metrics[]): Metrics {
       // per result) is itself an estimate and must be marked as such.
       if (m.valueIsEstimated) out.valueIsEstimated = true;
     }
+    if (m.reach != null) out.reach = (out.reach ?? 0) + m.reach;
+    out.reachRows += m.reachRows;
     if (m.videoViews != null) out.videoViews = (out.videoViews ?? 0) + m.videoViews;
     if (m.videoPlays != null) out.videoPlays = (out.videoPlays ?? 0) + m.videoPlays;
     if (m.thruplays != null) out.thruplays = (out.thruplays ?? 0) + m.thruplays;
@@ -257,6 +268,11 @@ export function buildTree(platform: Platform, rows: AdRow[], opts?: BuildOpts): 
  * Added rows carry zero metrics. Those are TRUE zeros, not missing numbers,
  * so they move no total; they are marked noDelivery so the Delivery column
  * can explain them instead of showing a bare "No delivery".
+ *
+ * Finally the ANCESTORS of every visible row are pulled in even when they
+ * fail the rule themselves, so the three levels never disagree about what
+ * exists and a row on the Ads tab is always reachable by drilling down from
+ * Campaigns. See the closure pass at the bottom.
  */
 export function mergeEntities(
   tree: PlatformTree,
@@ -291,19 +307,56 @@ export function mergeEntities(
   twoDaysAgo.setDate(twoDaysAgo.getDate() - 2);
   const rangeIsCurrent = range.to >= twoDaysAgo.toISOString().slice(0, 10);
 
+  // Ads are identified by (ad set, ad) at both ends - see adKey(). Using the
+  // bare entity_id would fail to match every google ad that sits in more
+  // than one ad group, and would re-add it as a phantom zero row. buildTree
+  // already stores the composite as an ad entity's id, so the index is keyed
+  // by id at every level; only the LOOKUP has to compose.
+  const keyOf = (level: EntityRow["level"], adsetId: string | null, id: string) =>
+    level === "ad" ? adKey(adsetId, id) : id;
+
+  const index = {
+    campaign: new Map(tree.campaigns.map((x) => [x.id, x] as const)),
+    adset: new Map(tree.groups.map((x) => [x.id, x] as const)),
+    ad: new Map(tree.ads.map((x) => [x.id, x] as const)),
+  } as const;
+
+  /** Push a zero metric row for an entity that exists but did not deliver. */
+  function add(level: EntityRow["level"], row: EntityRow): Entity {
+    const e: Entity = {
+      // Same identity buildTree would have produced for this row had it
+      // delivered, so a later sync with spend replaces it instead of sitting
+      // beside it as a duplicate.
+      id: keyOf(level, row.adset_id, row.entity_id),
+      level: levelNum[level],
+      name: row.entity_name || row.entity_id,
+      sub:
+        level === "ad"
+          ? row.adset_id
+            ? adsetName.get(row.adset_id) ?? row.adset_id
+            : ""
+          : level === "adset"
+            ? row.campaign_id
+              ? campaignName.get(row.campaign_id) ?? row.campaign_id
+              : ""
+            : "",
+      campaignId: row.campaign_id ?? row.entity_id,
+      groupId: level === "ad" ? row.adset_id : level === "adset" ? row.entity_id : null,
+      noDelivery: true,
+      status: row.status,
+      isLive: row.is_active,
+      createdAt: row.created_at,
+      m: emptyMetrics(),
+    };
+    byLevel[level].push(e);
+    index[level].set(e.id, e);
+    return e;
+  }
+
   for (const level of ["campaign", "adset", "ad"] as const) {
-    const list = byLevel[level];
-    // Ads are identified by (ad set, ad) at both ends - see adKey(). Using
-    // the bare entity_id here would fail to match every google ad that sits
-    // in more than one ad group, and would re-add it as a phantom zero row.
-    // buildTree already stores the composite as an ad entity's id, so the
-    // index is keyed by id at every level; only the LOOKUP has to compose.
-    const keyOf = (adsetId: string | null, id: string) =>
-      level === "ad" ? adKey(adsetId, id) : id;
-    const index = new Map(list.map((x) => [x.id, x] as const));
     for (const row of mine) {
       if (row.level !== level) continue;
-      const existing = index.get(keyOf(row.adset_id, row.entity_id));
+      const existing = index[level].get(keyOf(level, row.adset_id, row.entity_id));
       if (existing) {
         // It delivered in range: keep its real metrics and just attach the
         // status, so an ad that spent early in the window and was then
@@ -314,31 +367,51 @@ export function mergeEntities(
         continue;
       }
       if (!(rangeIsCurrent && row.is_active) && !createdInRange(row)) continue;
-      list.push({
-        // Same identity buildTree would have produced for this row had it
-        // delivered, so a later sync with spend replaces it instead of
-        // sitting beside it as a duplicate.
-        id: keyOf(row.adset_id, row.entity_id),
-        level: levelNum[level],
-        name: row.entity_name || row.entity_id,
-        sub:
-          level === "ad"
-            ? row.adset_id
-              ? adsetName.get(row.adset_id) ?? row.adset_id
-              : ""
-            : level === "adset"
-              ? row.campaign_id
-                ? campaignName.get(row.campaign_id) ?? row.campaign_id
-                : ""
-              : "",
-        campaignId: row.campaign_id ?? row.entity_id,
-        groupId: level === "ad" ? row.adset_id : level === "adset" ? row.entity_id : null,
-        noDelivery: true,
-        status: row.status,
-        isLive: row.is_active,
-        createdAt: row.created_at,
-        m: emptyMetrics(),
-      });
+      add(level, row);
+    }
+  }
+
+  // ----------------------------------------------------------- closure
+  //
+  // ANCESTORS OF A VISIBLE ROW ARE THEMSELVES VISIBLE.
+  //
+  // Without this the levels disagree about what exists, which is exactly
+  // what Alex hit on 2026-09-03: "only the campaigns with spend show up".
+  // The admission rule above is applied to each level independently, so an
+  // ad could pass it (live now, or built inside the range) while its ad set
+  // and campaign failed it (paused, built long ago). The ad then appeared in
+  // the flat Ads list under a campaign that had no row of its own, and no
+  // amount of drilling from Campaigns could ever reach it. On the live data
+  // that was 9 Meta ads, every one of them an ad reporting WITH_ISSUES
+  // inside a PAUSED campaign.
+  //
+  // This does NOT widen the rule and cannot flood the table: an ancestor is
+  // pulled in only because a child of it is already on screen, so the count
+  // is bounded by the number of distinct parents of rows that were going to
+  // be shown anyway. It is what makes the campaign level behave like the ad
+  // level rather than being a strictly smaller view of the same accounts.
+  //
+  // Deepest level first, so an ad's ad set is added before the pass that
+  // adds that ad set's campaign.
+  const entityAt = {
+    adset: new Map(mine.filter((e) => e.level === "adset").map((e) => [e.entity_id, e] as const)),
+    campaign: new Map(
+      mine.filter((e) => e.level === "campaign").map((e) => [e.entity_id, e] as const)
+    ),
+  } as const;
+  for (const [childLevel, parentLevel, parentIdOf] of [
+    ["ad", "adset", (e: Entity) => e.groupId],
+    ["adset", "campaign", (e: Entity) => e.campaignId],
+  ] as const) {
+    // Snapshot: add() appends to the same array we are walking.
+    for (const child of [...byLevel[childLevel]]) {
+      const pid = parentIdOf(child);
+      if (!pid || index[parentLevel].has(pid)) continue;
+      const parentRow = entityAt[parentLevel].get(pid);
+      // A parent the entity sync did not return (archived, or removed since)
+      // cannot be invented. The child stays listed at its own level, which is
+      // still better than dropping it.
+      if (parentRow) add(parentLevel, parentRow);
     }
   }
 }
@@ -397,6 +470,11 @@ export function metric(m: Metrics, k: MetricKey): number {
       return m.clicks ? m.spend / m.clicks : 0;
     case "cpm":
       return m.impressions ? (m.spend / m.impressions) * 1000 : 0;
+    case "frequency":
+      // Ratio of sums, exactly like hook rate and hold rate. Summing the per
+      // day frequencies, or averaging them, would weight a day that reached
+      // 12 people the same as a day that reached 30,000.
+      return m.reach && m.impressions ? m.impressions / m.reach : 0;
     case "cpa":
       return m.purchases ? m.spend / m.purchases : 0;
     case "roas":
