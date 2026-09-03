@@ -47,6 +47,61 @@ Metric traps baked into the scripts (do not "fix" them away):
 - Google REST v16 to v21 return a bare HTML 404 (retired, not blocked);
   currently pinned to v24, valid set v22 to v25 as of 2026-09-02.
 
+## Delivery is not existence (root cause, 2026-09-03)
+
+Every metric here comes from an **insights** API, and insights only describe
+delivery. An ad that has been built but has not spent returns **no insights
+row at all**, and `sync_meta.py` additionally drops any row with zero spend
+and zero impressions. So a new creative was invisible until it started
+spending, no matter what the UI did.
+
+That is what was reported on 2026-09-03: 98 of the 182 non-archived ads in
+the Meta Creative Testing campaign had never reached `ad_daily`, including
+all 24 ads of batches 99 to 106, built 2026-09-02 and left **paused**.
+
+The fix is `ad_entities` (migration 0010) plus `scripts/sync_entities.py`:
+a snapshot of what **exists** in each account, with status and creation
+time, replaced wholesale on every run just like `entity_budgets`. The
+frontend merges it over the insights tree (`mergeEntities`) so a built ad
+appears with true zeros and a Delivery pill that says why.
+
+Two deliberate choices:
+
+- **Which zero-delivery rows are shown**: those live right now, and those
+  created inside the selected range. Meta carries 1,873 non-archived ad
+  entities against 139 that delivered in a 30 day window, so showing every
+  one would bury the live rows. `is_active` is a fact about *now*, so it is
+  applied only when the range reaches the present; a historical range admits
+  only entities created inside it. Widen the range and older builds appear.
+- **The pipeline stays D-1** and is not extended to pull today. An ad
+  launched this morning is now visible through `ad_entities` with a
+  "No spend yet" pill, which is the honest state; pulling a partial today
+  would double the per-campaign insights calls against the fragile
+  `development_access` Meta token to buy a few hours of half-formed numbers.
+
+**An ad is identified by (ad set, ad), never by ad id alone.** Google's
+`ad_group_ad` links ONE ad resource into MANY ad groups and reports each link
+separately, so google ad ids are not unique: 19 ids in this account appear 2
+to 8 times, 75 rows over 19 ids. `ad_entities` is therefore keyed by a unique
+index on `(platform, level, entity_id, coalesce(adset_id,''))` — an index and
+not a primary key, because a PK cannot hold an expression and `adset_id` is
+null for campaign and adset rows. The frontend composes the same key in
+`adKey()`, used by BOTH `buildTree` and `mergeEntities`.
+
+`ad_daily` deliberately keeps storing the **bare** platform ad id with
+`adset_id` beside it, so entities and metrics still join with no change to
+`sync_google.py` and no backfill. This also fixes a latent bug in
+`buildTree`, which grouped ads by `ad_id` alone: the day two ad groups both
+spend on one google ad, that would have summed its spend across every ad
+group it sits in and kept an arbitrary parent.
+
+Status vocabularies differ and are stored verbatim, never normalised at sync
+time: Meta's `effective_status` already folds in the parents
+(`ADSET_PAUSED`, `CAMPAIGN_PAUSED`), TikTok's `secondary_status` likewise
+(`AD_STATUS_ADGROUP_DISABLE`), but **Google's per level `status` does not**,
+so `sync_entities.py` walks the ancestors itself. Without that walk Google
+reported 372 "active" entities against a true 46.
+
 ## What exists
 
 - Supabase project `xtrapxzbfuovnutldete` (eu-west-1), migrations 0000-0002

@@ -1,5 +1,20 @@
-import type { AdRow, BudgetRow, Entity, Level, Metrics, MetricKey, Platform } from "./types";
+import type { AdRow, BudgetRow, Entity, EntityRow, Level, Metrics, MetricKey, Platform } from "./types";
 import { PLATFORM_META } from "./types";
+
+/**
+ * Identity of an AD row, in ad_daily and in ad_entities alike.
+ *
+ * Google keys ad_group_ad by (ad_group, ad): one ad resource is linked into
+ * many ad groups and each link reports separately, so the bare ad id is not
+ * unique. Meta and TikTok ad ids happen to be unique, but the key has to
+ * describe the weakest guarantee. ad_daily stores the BARE platform ad id
+ * with adset_id beside it, and ad_entities does the same, so composing the
+ * key here (rather than storing a composite id) keeps the two joining
+ * without touching either sync's output.
+ */
+export function adKey(adsetId: string | null, adId: string | null): string {
+  return `${adsetId ?? ""}::${adId ?? ""}`;
+}
 
 export function emptyMetrics(): Metrics {
   return {
@@ -154,7 +169,15 @@ export function buildTree(platform: Platform, rows: AdRow[], opts?: BuildOpts): 
 
   const adGroups = groupBy(
     rows.filter((r) => r.ad_id != null),
-    (r) => r.ad_id,
+    // Keyed by (ad set, ad), NOT by ad_id alone. Google's ad_group_ad links
+    // ONE ad resource into many ad groups and reports each link separately,
+    // so ad_id alone is not unique there (19 ids in this account appear 2 to
+    // 8 times). Grouping by ad_id would silently SUM one ad's spend across
+    // every ad group it sits in and keep an arbitrary parent. It has not
+    // bitten yet only because no google ad has spent in two ad groups on the
+    // same day; ad_entities made the collision visible before it did.
+    // adKey() must stay identical to the lookup in mergeEntities.
+    (r) => adKey(r.adset_id, r.ad_id),
     (r) => ({
       name: r.ad_name || r.ad_id || "",
       sub: r.adset_name || r.adset_id || "",
@@ -210,6 +233,114 @@ export function buildTree(platform: Platform, rows: AdRow[], opts?: BuildOpts): 
     campaignGrainOnly,
     m: sumMetrics(campaigns.map((c) => c.m)),
   };
+}
+
+/**
+ * Add the entities that EXIST but have no ad_daily row in the range, and
+ * annotate the ones that do with their current platform status.
+ *
+ * THE BUG THIS FIXES (2026-09-03): every metric in this dashboard comes from
+ * an INSIGHTS API, and insights only describe delivery. An ad that has been
+ * built but has not spent returns no insights row at all, so it never
+ * reached ad_daily and the dashboard could not show it however the UI was
+ * written. 98 of the 182 non-archived ads in the Meta Creative Testing
+ * campaign had never appeared, including all 24 ads of batches 99 to 106,
+ * built 2026-09-02 and left paused.
+ *
+ * WHICH zero-delivery entities are added: those live right now, and those
+ * CREATED INSIDE the selected range. That is the honest reading of "what
+ * exists in this window" - it surfaces everything new and everything
+ * running, without resurrecting hundreds of ads paused months ago (Meta
+ * alone carries 1,873 non-archived ad entities against 139 that delivered in
+ * a 30 day window). Widen the range and older builds appear on their own.
+ *
+ * Added rows carry zero metrics. Those are TRUE zeros, not missing numbers,
+ * so they move no total; they are marked noDelivery so the Delivery column
+ * can explain them instead of showing a bare "No delivery".
+ */
+export function mergeEntities(
+  tree: PlatformTree,
+  entities: EntityRow[],
+  range: { from: string; to: string }
+): void {
+  const mine = entities.filter((e) => e.platform === tree.platform);
+  const byLevel = { campaign: tree.campaigns, adset: tree.groups, ad: tree.ads } as const;
+  const levelNum = { campaign: 0, adset: 1, ad: 2 } as const;
+
+  // Parent name lookups, so an added row fills its Detail column the same
+  // way a delivering row does.
+  const campaignName = new Map<string, string>();
+  const adsetName = new Map<string, string>();
+  for (const e of mine) {
+    if (e.level === "campaign") campaignName.set(e.entity_id, e.entity_name || e.entity_id);
+    else if (e.level === "adset") adsetName.set(e.entity_id, e.entity_name || e.entity_id);
+  }
+
+  const createdInRange = (e: EntityRow) => {
+    if (!e.created_at) return false;
+    const day = e.created_at.slice(0, 10);
+    return day >= range.from && day <= range.to;
+  };
+
+  // is_active is a fact about RIGHT NOW, not about the selected window, so
+  // it may only pull rows into a range that reaches the present. Applying it
+  // to, say, last March would list today's live ads as zero spend rows in a
+  // month they did not exist. A historical range therefore admits only
+  // entities actually created inside it.
+  const twoDaysAgo = new Date();
+  twoDaysAgo.setDate(twoDaysAgo.getDate() - 2);
+  const rangeIsCurrent = range.to >= twoDaysAgo.toISOString().slice(0, 10);
+
+  for (const level of ["campaign", "adset", "ad"] as const) {
+    const list = byLevel[level];
+    // Ads are identified by (ad set, ad) at both ends - see adKey(). Using
+    // the bare entity_id here would fail to match every google ad that sits
+    // in more than one ad group, and would re-add it as a phantom zero row.
+    // buildTree already stores the composite as an ad entity's id, so the
+    // index is keyed by id at every level; only the LOOKUP has to compose.
+    const keyOf = (adsetId: string | null, id: string) =>
+      level === "ad" ? adKey(adsetId, id) : id;
+    const index = new Map(list.map((x) => [x.id, x] as const));
+    for (const row of mine) {
+      if (row.level !== level) continue;
+      const existing = index.get(keyOf(row.adset_id, row.entity_id));
+      if (existing) {
+        // It delivered in range: keep its real metrics and just attach the
+        // status, so an ad that spent early in the window and was then
+        // switched off reads "Paused" instead of a bare "No delivery".
+        existing.status = row.status;
+        existing.isLive = row.is_active;
+        existing.createdAt = row.created_at;
+        continue;
+      }
+      if (!(rangeIsCurrent && row.is_active) && !createdInRange(row)) continue;
+      list.push({
+        // Same identity buildTree would have produced for this row had it
+        // delivered, so a later sync with spend replaces it instead of
+        // sitting beside it as a duplicate.
+        id: keyOf(row.adset_id, row.entity_id),
+        level: levelNum[level],
+        name: row.entity_name || row.entity_id,
+        sub:
+          level === "ad"
+            ? row.adset_id
+              ? adsetName.get(row.adset_id) ?? row.adset_id
+              : ""
+            : level === "adset"
+              ? row.campaign_id
+                ? campaignName.get(row.campaign_id) ?? row.campaign_id
+                : ""
+              : "",
+        campaignId: row.campaign_id ?? row.entity_id,
+        groupId: level === "ad" ? row.adset_id : level === "adset" ? row.entity_id : null,
+        noDelivery: true,
+        status: row.status,
+        isLive: row.is_active,
+        createdAt: row.created_at,
+        m: emptyMetrics(),
+      });
+    }
+  }
 }
 
 /**

@@ -48,6 +48,11 @@ METRIC_COLS = ["campaign_name", "adset_name", "ad_name", "spend", "impressions",
 OPTIONAL_COLS = ["thruplays", "purchases_are_pooled"]
 BUDGET_COLS = ["platform", "level", "entity_id", "campaign_id", "entity_name",
                "budget", "budget_type"]
+# ad_entities (migration 0010): what EXISTS in the accounts, with status and
+# creation time, so an ad that has never delivered can still be shown. Same
+# snapshot model as budgets - full replace, never history.
+ENTITY_COLS = ["platform", "level", "entity_id", "entity_name", "campaign_id",
+               "adset_id", "status", "is_active", "created_at"]
 CONFLICT = "(platform, date, campaign_id, COALESCE(adset_id,''), COALESCE(ad_id,''))"
 
 
@@ -96,10 +101,12 @@ def ad_daily_writable_cols(password):
     return {c for c, gen in info.items() if gen == "NEVER"}
 
 
-def budgets_table_exists(password):
+def table_exists(password, name):
+    """Probe so this loader is safe to run on either side of a migration:
+    the daily cron can run new code before the main session applies the SQL."""
     out = psql(password,
                "SELECT count(*) FROM information_schema.tables "
-               "WHERE table_schema='public' AND table_name='entity_budgets';")
+               f"WHERE table_schema='public' AND table_name={sql_str(name)};")
     return out.strip() == "1"
 
 
@@ -185,6 +192,49 @@ def load_budgets(password, day):
     return len(rows)
 
 
+def load_entities(password, day):
+    """Full replace of ad_entities from the day's snapshot (migration 0010).
+
+    Entities are CURRENT attributes, not history: which ads exist right now,
+    their status and when they were built. Replacing wholesale is what keeps
+    a deleted ad from lingering forever. sync_entities.py refuses to write a
+    partial file, so a file that exists is always the complete picture.
+    """
+    path = DATA_DIR / f"entities_{day}.ndjson"
+    rows = [json.loads(l) for l in path.read_text().splitlines() if l.strip()]
+    if not rows:
+        raise RuntimeError(f"{path.name} exists but is empty")
+    buf = io.StringIO()
+    w = csv.writer(buf)
+    for r in rows:
+        out = []
+        for c in ENTITY_COLS:
+            v = r.get(c)
+            if v is None:
+                out.append("")
+            elif isinstance(v, bool):
+                out.append("true" if v else "false")
+            else:
+                out.append(v)
+        w.writerow(out)
+    with tempfile.NamedTemporaryFile("w", suffix=".csv", delete=False) as f:
+        f.write(buf.getvalue())
+        csv_path = f.name
+    try:
+        psql(password, f"""
+            BEGIN;
+            CREATE TEMP TABLE estage (LIKE public.ad_entities INCLUDING DEFAULTS) ON COMMIT DROP;
+            \\copy estage ({", ".join(ENTITY_COLS)}) FROM '{csv_path}' WITH (FORMAT csv)
+            DELETE FROM public.ad_entities;
+            INSERT INTO public.ad_entities ({", ".join(ENTITY_COLS)})
+            SELECT {", ".join(ENTITY_COLS)} FROM estage;
+            COMMIT;
+        """)
+    finally:
+        pathlib.Path(csv_path).unlink(missing_ok=True)
+    return len(rows)
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--date", default=(dt.date.today() - dt.timedelta(days=1)).isoformat())
@@ -196,6 +246,10 @@ def main():
     # the 2026-09-03 backfill recorded 92 bogus budgets ERROR rows because
     # the old behavior demanded a budgets file for every historic date.
     ap.add_argument("--budgets", choices=["auto", "require"], default="auto")
+    # Entities follow the same rule as budgets: a CURRENT snapshot tied to the
+    # daily run, not to the day being (re)loaded. "require" in daily_sync.sh,
+    # "auto" for backfills and manual re-loads of historic days.
+    ap.add_argument("--entities", choices=["auto", "require"], default="auto")
     args = ap.parse_args()
     password = db_pass()
     failed = False
@@ -213,8 +267,11 @@ def main():
         cols.remove(c)
         metric_cols.remove(c)
 
-    for platform in args.platforms.split(","):
-        platform = platform.strip()
+    # An empty --platforms is a legitimate request: "load only the budgets
+    # and entities snapshots". Without the filter an empty string split to
+    # [''] and recorded a sync_runs row for a platform named '', which the
+    # platform check constraint then rejected.
+    for platform in [p.strip() for p in args.platforms.split(",") if p.strip()]:
         started = dt.datetime.now(dt.timezone.utc).isoformat()
         path = DATA_DIR / f"{platform}_{args.date}.ndjson"
         if not path.exists():
@@ -246,7 +303,7 @@ def main():
     # existing so this code is safe to run before the migration lands.
     bpath = DATA_DIR / f"budgets_{args.date}.ndjson"
     try:
-        have_budgets = budgets_table_exists(password)
+        have_budgets = table_exists(password, "entity_budgets")
     except Exception as e:
         have_budgets = False
         print(f"budgets: table probe failed ({e})", file=sys.stderr)
@@ -280,6 +337,48 @@ def main():
                 failed = True
     elif bpath.exists():
         print("budgets: entity_budgets table missing (migration 0006 not "
+              "applied) - snapshot left unloaded", file=sys.stderr)
+
+    # Entity snapshot -> ad_entities (migration 0010): full replace. This is
+    # the table that lets the dashboard show an ad that EXISTS but has never
+    # delivered - the insights APIs cannot report one, so without this a
+    # newly built (or paused) creative is invisible by construction.
+    epath = DATA_DIR / f"entities_{args.date}.ndjson"
+    try:
+        have_entities = table_exists(password, "ad_entities")
+    except Exception as e:
+        have_entities = False
+        print(f"entities: table probe failed ({e})", file=sys.stderr)
+    if have_entities:
+        started = dt.datetime.now(dt.timezone.utc).isoformat()
+        if not epath.exists() and args.entities == "auto":
+            print(f"entities: no snapshot for {args.date} (--entities auto) - skipped",
+                  file=sys.stderr)
+        elif not epath.exists():
+            err_file = DATA_DIR / f"entities_{args.date}.err"
+            detail = err_file.read_text()[-800:] if err_file.exists() else \
+                "no stderr captured - sync_entities never ran or wrote nothing"
+            msg = f"entities NDJSON missing: sync_entities failed. {detail}"
+            print(f"entities {args.date}: ERROR {msg}", file=sys.stderr)
+            try:
+                record_run(password, "entities", started, "error", None, msg)
+            except Exception as e:
+                print(f"entities: could not record sync_runs: {e}", file=sys.stderr)
+            failed = True
+        else:
+            try:
+                n = load_entities(password, args.date)
+                record_run(password, "entities", started, "success", n, None)
+                print(f"entities {args.date}: replaced ad_entities, {n} rows")
+            except Exception as e:
+                print(f"entities {args.date}: LOAD FAILED {e}", file=sys.stderr)
+                try:
+                    record_run(password, "entities", started, "error", None, str(e))
+                except Exception as e2:
+                    print(f"entities: could not record sync_runs: {e2}", file=sys.stderr)
+                failed = True
+    elif epath.exists():
+        print("entities: ad_entities table missing (migration 0010 not "
               "applied) - snapshot left unloaded", file=sys.stderr)
 
     sys.exit(1 if failed else 0)

@@ -1,4 +1,4 @@
-import { fmtCell, roasColor } from "../lib/display";
+import { deliveryState, fmtCell, roasColor } from "../lib/display";
 import { EMPTY, money } from "../lib/format";
 import type {
   ColumnDef,
@@ -113,9 +113,13 @@ export default function AdsTable(props: Props) {
 
   function cellFor(e: Entity, c: ColumnDef) {
     if (c.k === "status") {
-      const active = isActive(e);
+      // Delivery is derived from ad_daily plus the entity's platform status
+      // (ad_entities, migration 0010). Before that table existed an ad with
+      // no delivery had no row here at all - see deliveryState().
+      const st = deliveryState(e, isActive(e));
       return (
         <span
+          title={st.tip}
           style={{
             display: "inline-flex",
             alignItems: "center",
@@ -123,12 +127,13 @@ export default function AdsTable(props: Props) {
             borderRadius: 6,
             fontSize: 12,
             fontWeight: 600,
-            color: active ? "#1E7B4D" : "#65676B",
-            background: active ? "#E4F3EA" : "#F0F2F5",
+            color: st.color,
+            background: st.bg,
             whiteSpace: "nowrap",
+            cursor: st.tip ? "help" : undefined,
           }}
         >
-          {active ? "Delivering" : "No delivery"}
+          {st.label}
         </span>
       );
     }
