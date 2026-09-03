@@ -18,7 +18,14 @@ echo "=== daily_sync $DATE start $(date -Is) ==="
 
 for platform in meta tiktok google; do
   err="$DIR/../data/${platform}_${DATE}.err"
-  if python3 "$DIR/sync_${platform}.py" --date "$DATE" 2> "$err"; then
+  # Google re-pulls a 3 day window (approved 2026-09-03): the newest day is
+  # incomplete at pull time (2026-09-02 had 3 rows at first pull) and Google
+  # restates conversions for days (click day attribution). Replace-day
+  # loading makes the re-loads idempotent. Meta/TikTok stay single day -
+  # Meta's dev tier rate limit makes 3x the calls too fragile.
+  extra=""
+  [ "$platform" = "google" ] && extra="--days 3"
+  if python3 "$DIR/sync_${platform}.py" --date "$DATE" $extra 2> "$err"; then
     rm -f "$err"
     echo "sync_${platform}: ok"
   else
@@ -44,6 +51,14 @@ fi
 sleep 31
 
 python3 "$DIR/load.py" --date "$DATE" --platforms meta,tiktok,google --budgets require || FAILED=1
+
+# Load the two older days of google's 3 day window (the newest was in the
+# main load). --budgets defaults to auto, so no budgets snapshot is expected
+# for these dates.
+for back in 1 2; do
+  d="$(date -d "$DATE - $back day" +%F)"
+  python3 "$DIR/load.py" --date "$d" --platforms google || FAILED=1
+done
 
 echo "=== daily_sync $DATE done $(date -Is) exit $FAILED ==="
 exit $FAILED
