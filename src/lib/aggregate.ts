@@ -1,6 +1,21 @@
 import type { AdRow, BudgetRow, Entity, EntityRow, Level, Metrics, MetricKey, Platform } from "./types";
 import { PLATFORM_META } from "./types";
 
+/**
+ * Identity of an AD row, in ad_daily and in ad_entities alike.
+ *
+ * Google keys ad_group_ad by (ad_group, ad): one ad resource is linked into
+ * many ad groups and each link reports separately, so the bare ad id is not
+ * unique. Meta and TikTok ad ids happen to be unique, but the key has to
+ * describe the weakest guarantee. ad_daily stores the BARE platform ad id
+ * with adset_id beside it, and ad_entities does the same, so composing the
+ * key here (rather than storing a composite id) keeps the two joining
+ * without touching either sync's output.
+ */
+export function adKey(adsetId: string | null, adId: string | null): string {
+  return `${adsetId ?? ""}::${adId ?? ""}`;
+}
+
 export function emptyMetrics(): Metrics {
   return {
     spend: 0,
@@ -154,7 +169,15 @@ export function buildTree(platform: Platform, rows: AdRow[], opts?: BuildOpts): 
 
   const adGroups = groupBy(
     rows.filter((r) => r.ad_id != null),
-    (r) => r.ad_id,
+    // Keyed by (ad set, ad), NOT by ad_id alone. Google's ad_group_ad links
+    // ONE ad resource into many ad groups and reports each link separately,
+    // so ad_id alone is not unique there (19 ids in this account appear 2 to
+    // 8 times). Grouping by ad_id would silently SUM one ad's spend across
+    // every ad group it sits in and keep an arbitrary parent. It has not
+    // bitten yet only because no google ad has spent in two ad groups on the
+    // same day; ad_entities made the collision visible before it did.
+    // adKey() must stay identical to the lookup in mergeEntities.
+    (r) => adKey(r.adset_id, r.ad_id),
     (r) => ({
       name: r.ad_name || r.ad_id || "",
       sub: r.adset_name || r.adset_id || "",
@@ -270,10 +293,17 @@ export function mergeEntities(
 
   for (const level of ["campaign", "adset", "ad"] as const) {
     const list = byLevel[level];
-    const index = new Map(list.map((x) => [x.id, x]));
+    // Ads are identified by (ad set, ad) at both ends - see adKey(). Using
+    // the bare entity_id here would fail to match every google ad that sits
+    // in more than one ad group, and would re-add it as a phantom zero row.
+    // buildTree already stores the composite as an ad entity's id, so the
+    // index is keyed by id at every level; only the LOOKUP has to compose.
+    const keyOf = (adsetId: string | null, id: string) =>
+      level === "ad" ? adKey(adsetId, id) : id;
+    const index = new Map(list.map((x) => [x.id, x] as const));
     for (const row of mine) {
       if (row.level !== level) continue;
-      const existing = index.get(row.entity_id);
+      const existing = index.get(keyOf(row.adset_id, row.entity_id));
       if (existing) {
         // It delivered in range: keep its real metrics and just attach the
         // status, so an ad that spent early in the window and was then
@@ -285,7 +315,10 @@ export function mergeEntities(
       }
       if (!(rangeIsCurrent && row.is_active) && !createdInRange(row)) continue;
       list.push({
-        id: row.entity_id,
+        // Same identity buildTree would have produced for this row had it
+        // delivered, so a later sync with spend replaces it instead of
+        // sitting beside it as a duplicate.
+        id: keyOf(row.adset_id, row.entity_id),
         level: levelNum[level],
         name: row.entity_name || row.entity_id,
         sub:

@@ -79,6 +79,22 @@ Two deliberate choices:
   would double the per-campaign insights calls against the fragile
   `development_access` Meta token to buy a few hours of half-formed numbers.
 
+**An ad is identified by (ad set, ad), never by ad id alone.** Google's
+`ad_group_ad` links ONE ad resource into MANY ad groups and reports each link
+separately, so google ad ids are not unique: 19 ids in this account appear 2
+to 8 times, 75 rows over 19 ids. `ad_entities` is therefore keyed by a unique
+index on `(platform, level, entity_id, coalesce(adset_id,''))` — an index and
+not a primary key, because a PK cannot hold an expression and `adset_id` is
+null for campaign and adset rows. The frontend composes the same key in
+`adKey()`, used by BOTH `buildTree` and `mergeEntities`.
+
+`ad_daily` deliberately keeps storing the **bare** platform ad id with
+`adset_id` beside it, so entities and metrics still join with no change to
+`sync_google.py` and no backfill. This also fixes a latent bug in
+`buildTree`, which grouped ads by `ad_id` alone: the day two ad groups both
+spend on one google ad, that would have summed its spend across every ad
+group it sits in and kept an arbitrary parent.
+
 Status vocabularies differ and are stored verbatim, never normalised at sync
 time: Meta's `effective_status` already folds in the parents
 (`ADSET_PAUSED`, `CAMPAIGN_PAUSED`), TikTok's `secondary_status` likewise
