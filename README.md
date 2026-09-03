@@ -225,7 +225,7 @@ is the spec and the components recreate it with plain React and CSS.
 
 ```
 src/
-  App.tsx                     auth gate (session -> Dashboard, else Login)
+  App.tsx                     route + auth gate (recovery > session > login)
   components/
     Dashboard.tsx             all view state, data fetch, KPI + export logic
     AdsTable.tsx              level chips, drill down, sticky table, totals, footer
@@ -233,9 +233,15 @@ src/
     PlatformTabs.tsx          Meta / TikTok / Google with per platform spend
     KpiCards.tsx              6 cards with delta vs previous equal length period
     Login.tsx                 email + password (accounts created by an admin)
+    ForgotPassword.tsx        request a reset link, never enumerates addresses
+    ResetPassword.tsx         the /reset-password landing a recovery mail opens
+    ChangePassword.tsx        signed in change, current password required
+    authUi.tsx                shared card, field, rules and note primitives
     Dropdown.tsx              shared menu shell
   lib/
-    supabase.ts               client from VITE_SUPABASE_URL / VITE_SUPABASE_ANON_KEY
+    supabase.ts               client + ARRIVAL_URL snapshot (taken pre client)
+    authPolicy.ts             password rules and non enumerating error wording
+    routes.ts                 3 route switch, no router dependency
     data.ts                   paginated ad_daily fetch (never selects raw jsonb),
                               sync_runs staleness check (>26h, error, missing)
     aggregate.ts              entity trees per grain, pooled purchases exclusion
@@ -273,3 +279,110 @@ npm run typecheck && npm run build
 Deploy: Vercel project pointed at this repo (root), env vars
 `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY`. Handled by the main
 session, not from here.
+
+## Passwords: change, forget, reset (2026-09-03)
+
+Alex approved a self serve password flow so his password never has to travel
+through a chat window. Three screens, one shared policy file.
+
+| screen | route | who can reach it |
+|---|---|---|
+| Change password | dialog over the dashboard | signed in |
+| Forgot password | `/forgot-password` | anyone |
+| Reset password | `/reset-password` | anyone holding a recovery link |
+
+Change password is a DIALOG, not a route, so it does not unmount the table
+and re fetch a 30 day range on the way back. The other two are real routes:
+`vercel.json` already rewrites every path to `index.html`, so a three way
+switch on `location.pathname` is all a deep link needs and no router
+dependency was added.
+
+**The current password is verified client side, on purpose.** This project
+has `security_update_password_require_reauthentication = false`, so
+`updateUser({ password })` does NOT ask for the old one and anyone reaching an
+unlocked browser could set a new one. `ChangePassword` therefore calls
+`signInWithPassword` with the typed current password first and only updates if
+that succeeds. Verified in auth-js 2.113.0 rather than assumed: a FAILED
+`signInWithPassword` returns `{ data: { user: null, session: null }, error }`
+and never calls `_removeSession`, so a typo cannot sign you out of the page
+you are standing on. Confirmed live in the browser too.
+
+### Three arrival shapes, and the third is the one that ships broken
+
+```
+implicit  #access_token=...&refresh_token=...&type=recovery
+pkce      ?code=...
+FAILURE   #error=access_denied&error_code=otp_expired&error_description=...
+```
+
+The failure shape carries no tokens, so a reset screen that only looks for
+tokens renders nothing for an expired link. It is handled first, by name.
+
+`ARRIVAL_URL` in `supabase.ts` snapshots the hash and query **before**
+`createClient` runs. `detectSessionInUrl` defaults to true, so auth-js
+consumes a recovery callback and `history.replaceState`s it away during client
+construction; anything reading `window.location` afterwards sees a clean URL
+and concludes the link was invalid. Do not move those lines, and do not read
+`window.location` in the reset screen.
+
+`flowType` is left at the auth-js default, `implicit`. PKCE keeps tokens out
+of the URL but pins the link to the browser that requested it (the code
+verifier lives in that browser's localStorage), so requesting on a laptop and
+opening the mail on a phone fails. auth-js rejects a mismatch in both
+directions, so if this ever becomes `pkce` the reset screen must change with
+it.
+
+### No email enumeration
+
+Sign in and forgot password both speak in fixed sentences instead of
+forwarding what the API said. Supabase is careful today (one message for a
+wrong password and for an unknown address, and `resetPasswordForEmail`
+succeeds either way) but not uniformly: "Email not confirmed" confirms an
+account exists. `publicAuthError` collapses everything except rate limiting
+and network failure. Forgot password shows its confirmation even when the call
+returned an error, and does not echo the address back.
+
+Verified against the live auth server: an address with no account and
+`alex@pagepilot.ai` with a wrong password both render, byte for byte, "That
+email and password combination did not work. Check both and try again."
+
+### Alex has to change two things in the Supabase dashboard
+
+Read from the live auth config on 2026-09-03, **both are currently wrong and
+either one alone breaks every reset link**:
+
+```
+site_url       = 'http://localhost:3000'     <- reset mails point at a dead localhost
+uri_allow_list = ''                          <- empty, so redirectTo is rejected and
+                                                falls back to site_url, silently
+```
+
+Authentication -> URL Configuration:
+
+- **Site URL** -> `https://pagepilot-ads-manager2.vercel.app`
+- **Redirect URLs**, add both:
+  - `https://pagepilot-ads-manager2.vercel.app/**`
+  - `http://localhost:5173/**` (local dev only)
+
+Vercel PREVIEW deployments get a new hostname per build and are deliberately
+not whitelisted: a wildcard wide enough to cover them is an open redirect
+surface on the auth endpoint. Test resets on production or on localhost.
+
+Three more worth his attention, none of them blocking:
+
+- `disable_signup = false`. Public signup is ON for an internal tool whose
+  anon key ships in the JS bundle by design, so anyone can create an auth
+  user. RLS still shows them nothing (`private.is_admin()`), but they can
+  burn the email quota. Turn it off in Authentication -> Sign In / Providers.
+- `password_min_length = 6` with no character requirement. The app asks for
+  12, but that is a CLIENT rule; the API accepts 6. Raise it to 12 to make it
+  real.
+- `smtp_host` is unset, so recovery mail goes through Supabase's built in
+  sender with `rate_limit_email_sent = 2` per hour. That is fine for two
+  people and will feel broken the moment anyone retries. Custom SMTP if it
+  ever matters.
+
+Do NOT turn on `security_update_password_require_reauthentication`. It makes
+`updateUser({ password })` demand a nonce from a separate reauthentication
+email, which would break both the change and the reset screens. The client
+side verification above covers the same threat.
