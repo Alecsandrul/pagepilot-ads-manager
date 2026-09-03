@@ -67,7 +67,15 @@ export function deliveryState(e: Entity, deliveredLatest: boolean): DeliveryStat
   // "Running, but something is wrong" is a real Meta state (WITH_ISSUES), and
   // TikTok's partially approved is its analog. Both DELIVER, so they stay
   // distinct from green and from paused.
-  if (s.includes("WITH_ISSUES") || s.includes("PARTIALLY_APPROVED")) {
+  //
+  // UNLESS an ancestor is paused. WITH_ISSUES OUTRANKS CAMPAIGN_PAUSED in
+  // Meta's effective_status precedence, so the status alone cannot be
+  // trusted here: 9 ads in this account read WITH_ISSUES while sitting in a
+  // PAUSED campaign and were labelled "Live, issues" (found 2026-09-03).
+  // sync_entities.py now folds the ancestors into is_active, and isLive
+  // false is the signal that the parent, not the issue, is why it is dark.
+  // Fall through to the paused branches below in that case.
+  if ((s.includes("WITH_ISSUES") || s.includes("PARTIALLY_APPROVED")) && e.isLive !== false) {
     return {
       label: deliveredLatest ? "Delivering, issues" : "Live, issues",
       ...AMBER,
@@ -79,25 +87,34 @@ export function deliveryState(e: Entity, deliveredLatest: boolean): DeliveryStat
 
   if (deliveredLatest) return { label: "Delivering", ...GREEN };
 
-  // Which parent switched it off. Meta and TikTok name it in the status
-  // itself; Google does NOT (its per level status ignores ancestors, so an
-  // ad under a paused campaign still reads ENABLED). For Google the sync
-  // already resolved the truth into is_active, and a bare ENABLED that is
-  // not live can only mean a parent is paused - saying "Paused ... reports
-  // ENABLED" would contradict itself.
+  // Which parent switched it off. Meta and TikTok usually name it in the
+  // status itself; Google never does (its per level status ignores
+  // ancestors, so an ad under a paused campaign still reads ENABLED), and
+  // Meta's WITH_ISSUES outranks CAMPAIGN_PAUSED so it does not name it
+  // either. In both of those cases sync_entities.py has already resolved
+  // the truth into is_active, and a status that CLAIMS to be live while
+  // is_active is false can only mean an ancestor is paused. Saying
+  // "Paused ... reports ENABLED" would contradict itself, so those get their
+  // own label.
+  const claimsLive =
+    s === "ENABLED" ||
+    s === "ACTIVE" ||
+    s.includes("WITH_ISSUES") ||
+    s.includes("PARTIALLY_APPROVED") ||
+    (s.includes("ENABLE") && !s.includes("DISABLE"));
   const pausedBy =
     s.includes("ADSET_PAUSED") || s.includes("ADGROUP_DISABLE")
       ? "ad set"
       : s.includes("CAMPAIGN_PAUSED") || s.includes("CAMPAIGN_DISABLE")
         ? "campaign"
-        : s === "ENABLED" && !e.isLive
+        : claimsLive && e.isLive === false
           ? "parent"
           : null;
   if (pausedBy === "parent") {
     return {
       label: "Paused (parent)",
       ...GRAY,
-      tip: "Its own status is ENABLED, but an ad group or campaign above it is paused, so it cannot deliver.",
+      tip: `Its own status is ${e.status}, but an ad set, ad group or campaign above it is paused, so it cannot deliver.`,
     };
   }
 
@@ -173,6 +190,15 @@ export function fmtCell(m: Metrics, k: MetricKey, cur: Currency): string {
     if (!m.thruplays || !m.videoViews) return EMPTY;
     return dec((m.thruplays / m.videoViews) * 100, 1) + "%";
   }
+  // Frequency = impressions / reach, ratio of sums like the two above.
+  // Placeholder wherever reach is unknown: google (unique_users exists only
+  // at campaign grain and our google rows are ad grain) and every day synced
+  // before migration 0011. A missing denominator must never print as a
+  // number - a partial reach would silently inflate the ratio.
+  if (k === "frequency") {
+    if (!m.reach || !m.impressions) return EMPTY;
+    return dec(m.impressions / m.reach, 2);
+  }
   const v = metric(m, k);
   if (k === "spend" || k === "revenue" || k === "cpa") return money(v, 0, cur);
   if (k === "cpc" || k === "cpm") return money(v, 2, cur);
@@ -181,6 +207,35 @@ export function fmtCell(m: Metrics, k: MetricKey, cur: Currency): string {
   if (k === "ctr") return pct(v);
   if (k === "roas") return dec(v, 2) + "x";
   return "";
+}
+
+/**
+ * Per cell caveat for a Frequency figure, or undefined when there is none.
+ *
+ * A frequency built from ONE ad_daily row is the platform's own number. Built
+ * from more than one it is a LOWER BOUND, because reach is unique people and
+ * people do not add up: the same person counts once per day and once per ad
+ * that reached them. Both losses are real and large on this account.
+ *   across days  : campaign 120235045548680189, 27 Aug to 2 Sep 2026,
+ *                  1.88 by ratio of sums against 2.64 in Meta (28.6% low)
+ *   across ads   : the same campaign on 2026-09-02 alone, 43 ads,
+ *                  1.29 by ratio of sums against 1.99 in Meta (35.2% low)
+ * Ratio of sums is still the only defensible aggregate available at the daily
+ * grain ad_daily stores: averaging the per row frequencies would weight a day
+ * that reached 12 people the same as one that reached 30,000, which is worse
+ * and hides the problem instead of bounding it.
+ */
+export function frequencyTip(m: Metrics): string | undefined {
+  if (!m.reach || !m.impressions) return undefined;
+  if (m.reachRows <= 1) return "Exactly as the platform reports it: one ad, one day.";
+  return (
+    "A LOWER BOUND. This row sums " +
+    `${m.reachRows} daily reach figures, and reach is unique people: anyone who saw the ads on ` +
+    "two days, or through two of these ads, is counted twice in the denominator. The platform " +
+    "deduplicates them and reports a HIGHER frequency for the same rows (measured 1.29 here " +
+    "against 1.99 in Meta on one campaign day). Drill down to a single ad and pick a single day " +
+    "to read the exact figure."
+  );
 }
 
 /**

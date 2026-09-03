@@ -1,4 +1,4 @@
-import { deliveryState, fmtCell, roasColor } from "../lib/display";
+import { deliveryState, fmtCell, frequencyTip, roasColor } from "../lib/display";
 import { EMPTY, money } from "../lib/format";
 import type {
   ColumnDef,
@@ -48,6 +48,13 @@ interface Props {
   notice: string | null;
   /** Tooltip for estimated Conversion value / ROAS cells (tiktok assumed value). */
   estTooltip: string;
+  /**
+   * How much of the platform's Amount spent the rows at this level account
+   * for. Always rendered, in the good case too: a coverage claim that only
+   * appears when something is wrong cannot be used to confirm that nothing
+   * is (Alex, 2026-09-03).
+   */
+  footerCoverage: string;
   footerRight: string;
 }
 
@@ -103,6 +110,7 @@ export default function AdsTable(props: Props) {
     density,
     notice,
     estTooltip,
+    footerCoverage,
     footerRight,
   } = props;
 
@@ -171,9 +179,11 @@ export default function AdsTable(props: Props) {
         title={
           isEst
             ? estTooltip
-            : e.m.pooled && (c.k === "conv" || c.k === "cpa") && v !== EMPTY
-              ? "Pooled conversions, not purchases"
-              : undefined
+            : c.k === "frequency" && v !== EMPTY
+              ? frequencyTip(e.m)
+              : e.m.pooled && (c.k === "conv" || c.k === "cpa") && v !== EMPTY
+                ? "Pooled conversions, not purchases"
+                : undefined
         }
         style={{
           fontSize: 13,
@@ -457,7 +467,13 @@ export default function AdsTable(props: Props) {
                 return (
                   <div
                     key={c.k}
-                    title={isEst ? estTooltip : undefined}
+                    title={
+                      isEst
+                        ? estTooltip
+                        : c.k === "frequency" && v !== "" && v !== EMPTY
+                          ? frequencyTip(totals)
+                          : undefined
+                    }
                     style={{
                       flex: `0 0 ${c.w}px`,
                       width: c.w,
@@ -595,6 +611,7 @@ export default function AdsTable(props: Props) {
           }}
         >
           <span>{`${items.length} of ${totalCount} rows · ${currency}`}</span>
+          <span style={{ textAlign: "center" }}>{footerCoverage}</span>
           <span>{footerRight}</span>
         </div>
       </div>

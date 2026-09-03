@@ -1,12 +1,13 @@
 import { supabase } from "./supabase";
 import type { AdRow, BudgetRow, EntityRow, Platform, SyncRun } from "./types";
 
-// NOTE: `thruplays` requires migration 0005 on the live DB - PostgREST
-// rejects the whole select if the column is missing. Deploy this frontend
-// only AFTER 0005 is applied.
+// NOTE: `thruplays` requires migration 0005 on the live DB and `reach`
+// requires 0011 - PostgREST rejects the WHOLE select if any named column is
+// missing, so the table would render empty, not just short a column. Deploy
+// this frontend only AFTER 0005 and 0011 are applied.
 const AD_COLUMNS =
   "platform,date,campaign_id,campaign_name,adset_id,adset_name,ad_id,ad_name," +
-  "spend,impressions,clicks,video_views,video_plays,thruplays,purchases,purchase_value,purchases_are_pooled";
+  "spend,impressions,reach,clicks,video_views,video_plays,thruplays,purchases,purchase_value,purchases_are_pooled";
 
 const PAGE = 1000;
 

@@ -96,11 +96,98 @@ spend on one google ad, that would have summed its spend across every ad
 group it sits in and kept an arbitrary parent.
 
 Status vocabularies differ and are stored verbatim, never normalised at sync
-time: Meta's `effective_status` already folds in the parents
-(`ADSET_PAUSED`, `CAMPAIGN_PAUSED`), TikTok's `secondary_status` likewise
+time: Meta's `effective_status` MOSTLY folds in the parents (`ADSET_PAUSED`,
+`CAMPAIGN_PAUSED`), TikTok's `secondary_status` likewise
 (`AD_STATUS_ADGROUP_DISABLE`), but **Google's per level `status` does not**,
 so `sync_entities.py` walks the ancestors itself. Without that walk Google
 reported 372 "active" entities against a true 46.
+
+**"Mostly" was wrong, corrected 2026-09-03.** Meta's `WITH_ISSUES` OUTRANKS
+`CAMPAIGN_PAUSED` in its own precedence, so 9 ads in this account reported
+`WITH_ISSUES` while sitting inside a PAUSED campaign. `is_active` said true
+for ads that cannot possibly deliver, the Delivery pill read "Live, issues",
+and `mergeEntities` pulled them into the Ads tab under a campaign that
+(correctly) had no row of its own. The ancestor walk is therefore no longer
+Google-only: `fold_parents()` runs over the whole snapshot, for every
+platform, after all three fetches. It is idempotent and demoted 0 rows on
+TikTok and Google, 9 on Meta.
+
+### Ancestors of a visible row are visible (2026-09-03)
+
+The admission rule above is applied to each level independently, so an ad
+could pass it (live now, or built inside the range) while its ad set and
+campaign failed it (paused, built long ago). The ad then showed on the Ads
+tab under a campaign with no row, unreachable by drilling from Campaigns,
+and the three levels disagreed about what the account contains. That is what
+Alex saw as "only the campaigns with spend show up".
+
+`mergeEntities` now ends with a closure pass: any ancestor of a visible row
+is pulled in even when it fails the rule itself. It cannot flood the table,
+because an ancestor is only added when a child of it is already on screen.
+Measured on the live 30 day range: with the stale `is_active` it added 3 Meta
+campaigns and 7 ad sets; once `fold_parents` demoted the 9 mislabelled ads
+there was nothing left to close over, and the orphan count is 0 on all three
+platforms.
+
+## Amount spent equals the visible rows, or the footer says so
+
+Alex, 2026-09-03: *"only the campaigns with spend show up, so I do not think
+the ones without are counted in Amount spent"*. Verified against the live DB
+for 4 Aug to 2 Sep 2026:
+
+| platform | Amount spent | campaigns | ad sets / groups | ads |
+|---|---|---|---|---|
+| meta | $19,275.73 | $19,275.73 | $19,275.73 | $19,275.73 |
+| google | $11,716.17 | $11,716.17 | $11,716.17 | $11,716.17 |
+| tiktok | $11,391.26 | $11,391.26 | **$4,548.86** | **$4,548.86** |
+
+At **campaign level the two are identical by construction** on every
+platform: `buildTree` sums every campaign and `ad_daily.campaign_id` is NOT
+NULL, so no spending row can fail to produce a campaign. Zero-delivery rows
+merged in from `ad_entities` carry true zeros and move no total.
+
+Below campaign level they can differ, and it is the mixed grain, not a bug: a
+TikTok Smart+ campaign is stored as ONE campaign row with `adset_id` and
+`ad_id` NULL, because the API publishes no per ad breakdown for it, so it can
+never produce an ad group or ad row. That is $6,842.40 of TikTok's $11,391.26
+over the last 30 days, 60.1% of the platform. Meta and Google cover 100% at
+every level.
+
+Rather than leave that to be rediscovered, the table footer now states the
+coverage at the current level **always**, in the matching case too (a claim
+that only appears when something is wrong cannot confirm that nothing is),
+and the notice bar names the missing money when there is a gap.
+
+## Frequency (migration 0011, 2026-09-03)
+
+`frequency = impressions / reach`. It is a RATIO, so it is never summed or
+averaged: `reach` is stored and the ratio is recomputed at every row, exactly
+like hook rate and hold rate.
+
+Coverage, probed live 2026-09-03: **Meta** returns `reach` at ad level (its
+own `frequency` equals impressions/reach to 6 decimals). **TikTok** accepts
+`reach` at `AUCTION_AD`, `AUCTION_ADGROUP`, `AUCTION_CAMPAIGN` and
+`AUCTION_ADVERTISER`, so both grains we sync carry it. **Google** exposes
+`metrics.unique_users` only on `FROM campaign` (v24 rejects it on
+`ad_group_ad` with INVALID_ARGUMENT) while our google grain has been ad level
+since 2026-09-02, and campaign level unique users cannot be split across ads,
+so google reach stays NULL and the cell shows its placeholder.
+
+**Read the number as a LOWER BOUND anywhere it is aggregated.** Reach is
+unique people and people do not add up: the same person counts once per day
+and once per ad that reached them. Both losses are large here.
+
+| aggregation | ratio of sums | platform figure | low by |
+|---|---|---|---|
+| 1 campaign, 43 ads, one day | 1.29 | 1.99 | 35.2% |
+| 1 campaign, 7 days | 1.88 | 2.64 | 28.6% |
+
+Only a single ad on a single day is exact, and the cell tooltip says which
+case it is in. Ratio of sums is still the right choice at this grain:
+averaging the per row frequencies would weight a day that reached 12 people
+the same as one that reached 30,000, which is worse and hides the loss
+instead of bounding it. A true window frequency would need a per range reach
+pull, which the daily grain of `ad_daily` cannot express.
 
 ## What exists
 
@@ -109,7 +196,8 @@ reported 372 "active" entities against a true 46.
 - `supabase/migrations/` - 0000 `private.is_admin` bootstrap, 0001
   `ad_daily` (mixed grain, expression unique index) + `sync_runs`
   (observability, every run recorded) + admin RLS, 0002
-  `purchases_are_pooled` generated column.
+  `purchases_are_pooled` generated column, 0010 `ad_entities`, 0011
+  `ad_daily.reach` (Frequency; NOT applied yet as of 2026-09-03).
 - `scripts/sync_{meta,tiktok,google}.py` - tested against the live APIs
   (read-only) for 2026-09-01.
 - `scripts/load.py` - NDJSON -> `ad_daily` upsert via psql `\copy` staging

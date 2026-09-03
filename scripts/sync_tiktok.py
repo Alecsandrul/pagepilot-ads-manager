@@ -18,6 +18,15 @@ HARD CONSTRAINTS (memory: reference_tiktok_ad_copy_2026_08_11):
   * thruplays = video_watched_6s - TikTok has no ThruPlay; the 6s watched
     count is the closest analog (hold rate = 6s / 2s). Added 2026-09-02.
   * purchase_value stays NULL - no trustworthy value metric on this account.
+  * reach = the BASIC metric `reach`, the denominator of Frequency
+    (migration 0011, added 2026-09-03). PROBED LIVE 2026-09-03: reach is
+    valid at AUCTION_AD, AUCTION_ADGROUP, AUCTION_CAMPAIGN and
+    AUCTION_ADVERTISER, so BOTH grains this script emits carry it. TikTok
+    also offers a `frequency` metric and we deliberately do not store it: a
+    ratio cannot be summed, so the UI recomputes
+    sum(impressions)/sum(reach). Checked on 2026-09-02: TikTok reported
+    frequency 1.72 for a campaign with 230,389 impressions and 134,021
+    reach (230389/134021 = 1.719), so the recomputation matches per day.
 
 Usage:  sync_tiktok.py [--date YYYY-MM-DD] [--days N]
 Output: data/tiktok_<date>.ndjson + summary on stdout.
@@ -88,7 +97,7 @@ def fetch_campaign_flags(token):
 
 
 def fetch_report(token, level, dims, id_metrics, day):
-    metrics = id_metrics + ["spend", "impressions", "clicks",
+    metrics = id_metrics + ["spend", "impressions", "reach", "clicks",
                             "video_play_actions", "video_watched_2s",
                             "video_watched_6s", "complete_payment"]
     rows, page = [], 1
@@ -122,6 +131,12 @@ def to_row(day, dims, m, grain):
         "ad_name": m.get("ad_name") if grain == "ad" else None,
         "spend": float(m.get("spend", 0)),
         "impressions": int(m.get("impressions", 0)),
+        # NULL, never 0, when the metric is absent: an unknown denominator
+        # must render as the Frequency placeholder rather than divide by
+        # zero. A real zero reach (a row with no delivery) is dropped by the
+        # caller's spend/impressions filter before it ever gets here.
+        "reach": (lambda v: int(v) if v not in (None, "") else None)(
+            m.get("reach")),
         "clicks": int(m.get("clicks", 0)),
         "video_views": int(m.get("video_watched_2s", 0)),
         "video_plays": int(m.get("video_play_actions", 0)),

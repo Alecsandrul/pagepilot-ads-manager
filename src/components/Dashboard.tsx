@@ -220,6 +220,43 @@ export default function Dashboard() {
     [platformLatest]
   );
 
+  /**
+   * Does the Amount spent KPI equal the sum of the rows on screen?
+   *
+   * THE QUESTION (Alex, 2026-09-03): "only the campaigns with spend show up,
+   * so I do not think the ones without are counted in Amount spent". The
+   * card is the whole platform (buildTree sums EVERY campaign), and every
+   * ad_daily row carries a campaign_id, so at Campaigns level the two are
+   * identical by construction and always have been.
+   *
+   * Below that level they are not, and it is not a bug: ad_daily is a MIXED
+   * grain. A TikTok Smart+ campaign is stored as one campaign row with
+   * adset_id and ad_id NULL (the API publishes no per ad breakdown for it),
+   * so it can never produce an ad group or ad row. On 2026-09-02 that was
+   * $6,842 of TikTok's $11,391 in the last 30 days, 60% of the platform.
+   * Meta and Google both cover 100% at every level.
+   *
+   * Rather than argue it in a comment, the number is now on screen: the
+   * footer states what the rows cover, always, and the notice explains any
+   * shortfall. A future grain change that starts hiding spend will show up
+   * here by itself.
+   */
+  const coverage = useMemo(() => {
+    const list =
+      isGoogle && level > 0 && tree.groups.length === 0 && tree.ads.length === 0
+        ? tree.campaigns
+        : level === 0
+          ? tree.campaigns
+          : level === 1
+            ? tree.groups
+            : tree.ads;
+    const covered = list.reduce((a, e) => a + e.m.spend, 0);
+    const gap = tree.m.spend - covered;
+    // Money is stored at 2dp and summed over hundreds of rows; anything under
+    // half a unit of currency is float noise, not missing spend.
+    return { total: tree.m.spend, covered, gap: Math.abs(gap) < 0.5 ? 0 : gap };
+  }, [tree, level, isGoogle]);
+
   // Items at the current level, before search and sort
   const { baseItems, notice } = useMemo((): { baseItems: Entity[]; notice: string | null } => {
     // Google syncs at ad grain since 2026-09-02; a range holding only the
@@ -267,8 +304,24 @@ export default function Dashboard() {
         `(built or live but not delivering). ${one ? "It shows" : "They show"} zero, not missing data.`;
       note = note ? `${note} ${zeroNote}` : zeroNote;
     }
+
+    // Name the missing spend in money, not in prose. Only without a parent
+    // chip: inside one campaign the rows are meant to be a subset of the
+    // platform, and comparing them to the platform wide card would be
+    // nonsense. See the coverage memo above for why a gap is legitimate.
+    if (!parent && coverage.gap > 0) {
+      const why =
+        platform === "tiktok"
+          ? "TikTok publishes no per ad breakdown for Smart+ campaigns, so they are stored at campaign level"
+          : "some campaigns in this range report above this level";
+      const gapNote =
+        `${money(coverage.gap, 0, currency)} of the ${money(coverage.total, 0, currency)} in Amount spent ` +
+        `has no row at this level (${why}), so these rows add up to ${money(coverage.covered, 0, currency)}. ` +
+        `Switch to ${meta.terms[0]} to see all of it.`;
+      note = note ? `${note} ${gapNote}` : gapNote;
+    }
     return { baseItems: items, notice: note };
-  }, [tree, level, parent, isGoogle, platform, meta]);
+  }, [tree, level, parent, isGoogle, platform, meta, coverage, currency]);
 
   const items = useMemo(() => {
     let out = baseItems;
@@ -364,6 +417,17 @@ export default function Dashboard() {
     if (run.status === "error") return `Last ${meta.label} sync FAILED ${rel}`;
     return `Last ${meta.label} sync ${rel} · platform reported metrics`;
   }, [sync, platform, meta.label]);
+
+  // Footer centre: a standing, checkable answer to "is Amount spent made of
+  // rows I can see?". Stated whether the answer is yes or no, because only
+  // saying it when something is wrong leaves the good case unverifiable.
+  const footerCoverage = useMemo(() => {
+    const term = meta.terms[level].toLowerCase();
+    if (coverage.gap <= 0) {
+      return `${term} cover all ${money(coverage.total, 0, currency)} of Amount spent`;
+    }
+    return `${term} cover ${money(coverage.covered, 0, currency)} of the ${money(coverage.total, 0, currency)} in Amount spent`;
+  }, [coverage, currency, meta, level]);
 
   const estTooltip = `Estimated at $${tiktokValue} per result, set in Display settings`;
   const tiktokDraftValid = Number.isFinite(Number(tiktokDraft)) && Number(tiktokDraft) > 0;
@@ -699,6 +763,7 @@ export default function Dashboard() {
           density={density}
           notice={notice}
           estTooltip={estTooltip}
+          footerCoverage={footerCoverage}
           footerRight={footerRight}
         />
       )}
